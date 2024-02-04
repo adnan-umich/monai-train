@@ -83,7 +83,7 @@ def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:d
         dice_metric = DiceMetric(include_background=metric['include_background'], reduction=metric['reduction'])
     elif metric_type == "DiceCELoss":
         loss_function = DiceCELoss(to_onehot_y=True, softmax=metric['softmax'])
-        dice_metric = DiceCEMetric(include_background=metric['include_background'], reduction=metric['reduction'])
+        dice_metric = DiceMetric(include_background=metric['include_background'], reduction=metric['reduction'])
 
     ## OPTIMIZATION ##
     if optimizer_type == "Adam":
@@ -117,6 +117,7 @@ def execute():
     metric_dict = parse_args(create_parser())[0]['model']['metric']
     data_dir = parse_args(create_parser())[1]
     output_dir = parse_args(create_parser())[2]
+    transfer_learning = parse_args(create_parser())[3]
 
     # Step 0
     if not os.path.exists(output_dir):
@@ -140,8 +141,15 @@ def execute():
     post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
     post_label = Compose([AsDiscrete(to_onehot=2)])
 
+    ### Transfer Learning ###
+    if len(transfer_learning) > 1:
+        model.load_state_dict(torch.load(transfer_learning))
+        model.eval()
+
     # log max epochs
     aim_run["max_epochs"] = max_epochs
+    # log batch size
+    aim_run["batch_size"] = batch_size
     slice_to_track = 20
 
     for epoch in range(max_epochs):
@@ -292,6 +300,11 @@ def create_parser():
         '--output',
         dest='output_dir',
         type=str)
+    g.add_argument(
+        '--transfer',
+        dest='transfer_learning',
+        type=str,
+        default='')
     return parser
 
 def parse_args(parser):
@@ -303,7 +316,9 @@ def parse_args(parser):
         data_dir = args.data_dir
     if args.output_dir:
         output_dir = args.output_dir
-    return [model, data_dir, output_dir]
+    if args.transfer_learning:
+        output_dir = args.transfer_learning
+    return [model, data_dir, output_dir, transfer_learning]
 
 
 if __name__ == "__main__":
