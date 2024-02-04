@@ -1,3 +1,7 @@
+.aim
+/monai
+/out
+*.pth
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
 

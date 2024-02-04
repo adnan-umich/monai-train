@@ -1,0 +1,17 @@
+train_transforms:
+  LoadImaged(keys=["image", "label"])
+  EnsureChannelFirstd(keys=["image", "label"])
+  ScaleIntensityRanged(keys=["image"], a_min=-57, a_max=164, b_min=0.0, b_max=1.0, clip=True)
+  ResizeD(keys=["image", "label"],spatial_size=(256,256,256))
+  CropForegroundd(keys=["image", "label"], source_key="image")
+  Orientationd(keys=["image", "label"], axcodes="RAS")
+  Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest"))
+  RandCropByPosNegLabeld(keys=["image", "label"], label_key="label", spatial_size=(48,48,48), pos=1, neg=1, num_samples=4, image_key="image", image_threshold=0),
+val_transforms:
+  - LoadImaged(keys=["image", "label"])
+  - EnsureChannelFirstd(keys=["image", "label"])
+  - ScaleIntensityRanged(keys=["image"], a_min=-57, a_max=164, b_min=0.0, b_max=1.0, clip=True)
+  - ResizeD(keys=["image", "label"],spatial_size=(256,256,256))
+  - CropForegroundd(keys=["image", "label"], source_key="image")
+  - Orientationd(keys=["image", "label"], axcodes="RAS")
+  - Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest"))

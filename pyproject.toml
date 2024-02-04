@@ -4,6 +4,19 @@ version = "0.1.0"
 description = "training and inference pipeline utilizing the MONAI and Pytorch frameworks"
 authors = ["Adnan Hafeez"]
 readme = "README.md"
+repository = "https://github.com/adnan-umich/monai-train"
+keywords = [
+    "Poetry",
+    "Virtual Environments",
+    "Machine Learning",
+    "Data Science",
+    "Medical Imagine Segmentation",
+    "Segmentation",
+    "Pytorch", 
+    "Aim",
+    "MONAI",
+]
+
 
 [tool.poetry.dependencies]
 python = "^3.9, <3.13"
