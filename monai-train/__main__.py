@@ -314,8 +314,8 @@ def execute():
                 # Layout
                 fig.update_layout(
                         title='Slices in volumetric data',
-                        width=600,
-                        height=600,
+                        width=800,
+                        height=800,
                         scene=dict(
                                     zaxis=dict(range=[0, nb_frames], autorange=False),
                                     aspectratio=dict(x=1, y=1, z=1),
