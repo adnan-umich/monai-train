@@ -8,6 +8,8 @@ import os
 import glob
 import numpy as np
 import argparse
+import time
+import plotly.graph_objects as go
 from monai.utils import first, set_determinism
 from monai.transforms import (
     AsDiscrete,
@@ -257,26 +259,97 @@ def execute():
             for i, val_data in enumerate(val_loader):
                 roi_size = (48, 48, 48) # used to be 160
                 sw_batch_size = 4
-                slice = 12
                 val_outputs = sliding_window_inference(val_data["image"].to(device), roi_size, sw_batch_size, model)
-                # plot the slice [:, :, slice]
-                #fig = plt.figure("check", (18, 6))
-                
-                fig = plt.figure("check", (18,6))
-                plt.title(f"image {i}")
-                plt.imshow(val_data["image"][0, 0, :, :, slice], cmap="gray")
-                mask_pred = np.zeros(val_data["image"][0, 0, :, :, slice].shape)
-                mask_pred[torch.argmax(val_outputs, dim=1).detach().cpu()[0, :, :, slice]==1] = 1
-                masked_pred = np.ma.masked_where(mask_pred == 0, mask_pred)
-                plt.imshow(masked_pred, 'Spectral', interpolation='none', alpha=0.7)
-                mask_org = np.zeros(val_data["image"][0, 0, :, :, slice].shape)
-                mask_org[val_data["label"][0, 0, :, :, slice]==1] = 1
-                masked_org = np.ma.masked_where(mask_org == 0, mask_org)
-                plt.imshow(masked_org, 'ocean', interpolation='none', alpha=0.3)
-                aim_run.track(aim.Image(fig), name=f"final_{index}")   
+                ### Plotly figure ###
+                vol = val_data["image"][0, 0, :, :, :].detach().cpu().numpy()
+                mask = torch.argmax(val_outputs, dim=1).detach().cpu()[0, :, :, :]
+
+                volume = vol.T*mask.T
+                r, c = volume[0].shape
+                nb_frames = volume.shape[2]
+
+                fig = go.Figure(frames=[go.Frame(data=go.Surface(
+                    z=(nb_frames - k) * np.ones((r, c)),
+                    surfacecolor=np.flipud(volume[nb_frames - 1 - k]),
+                    cmin=0, cmax=1
+                    ),
+                    name=str(k) # you need to name the frame for the animation to behave properly
+                    )
+                    for k in range(nb_frames)])
+
+                # Add data to be displayed before animation starts
+                fig.add_trace(go.Surface(
+                    z=nb_frames * np.ones((r, c)),
+                    surfacecolor=np.flipud(volume[nb_frames-1]),
+                    colorscale='Gray',
+                    cmin=0, cmax=1,
+                    colorbar=dict(thickness=20, ticklen=4)
+                    ))
+
+                def frame_args(duration):
+                    return {
+                            "frame": {"duration": duration},
+                            "mode": "immediate",
+                            "fromcurrent": True,
+                            "transition": {"duration": duration, "easing": "linear"},
+                        }
+
+                sliders = [
+                            {
+                                "pad": {"b": 10, "t": 60},
+                                "len": 0.9,
+                                "x": 0.1,
+                                "y": 0,
+                                "steps": [
+                                    {
+                                        "args": [[f.name], frame_args(0)],
+                                        "label": str(k),
+                                        "method": "animate",
+                                    }
+                                    for k, f in enumerate(fig.frames)
+                                ],
+                            }
+                        ]
+
+                # Layout
+                fig.update_layout(
+                        title='Slices in volumetric data',
+                        width=600,
+                        height=600,
+                        scene=dict(
+                                    zaxis=dict(range=[0, nb_frames], autorange=False),
+                                    aspectratio=dict(x=1, y=1, z=1),
+                                    ),
+                        updatemenus = [
+                            {
+                                "buttons": [
+                                    {
+                                        "args": [None, frame_args(50)],
+                                        "label": "&#9654;", # play symbol
+                                        "method": "animate",
+                                    },
+                                    {
+                                        "args": [[None], frame_args(0)],
+                                        "label": "&#9724;", # pause symbol
+                                        "method": "animate",
+                                    },
+                                ],
+                                "direction": "left",
+                                "pad": {"r": 10, "t": 70},
+                                "type": "buttons",
+                                "x": 0.1,
+                                "y": 0,
+                            }
+                        ],
+                        sliders=sliders
+                )
+                fig.show()
+
+
+                ####################
+
+                aim_run.track(aim.Figure(fig), name=f"final_{index}")   
                 plt.close()
-                if i == 1:
-                    break
         return None
 
     inference_fig()
@@ -318,6 +391,8 @@ def parse_args(parser):
         output_dir = args.output_dir
     if args.transfer_learning:
         output_dir = args.transfer_learning
+    else:
+        transfer_learning = ''
     return [model, data_dir, output_dir, transfer_learning]
 
 
