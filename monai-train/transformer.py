@@ -32,7 +32,7 @@ train_transforms = Compose(
         ),
         #ResizeD(keys=["image", "label"],spatial_size=(256,256,256)), # Unet
         ResizeD(keys=["image", "label"],spatial_size=(96, 96, 96)), # Unetr
-        CropForegroundd(keys=["image", "label"], source_key="image"),
+        CropForegroundd(keys=["image", "label"], source_key="image", allow_smaller=True),
         Orientationd(keys=["image", "label"], axcodes="RAS"),
         Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
         RandCropByPosNegLabeld(
@@ -70,7 +70,7 @@ val_transforms = Compose(
         ),
         #ResizeD(keys=["image", "label"],spatial_size=(256,256,256)), #Unet
         ResizeD(keys=["image", "label"],spatial_size=(96, 96, 96)), # Unetr
-        CropForegroundd(keys=["image", "label"], source_key="image"),
+        CropForegroundd(keys=["image", "label"], source_key="image", allow_smaller=True),
         Orientationd(keys=["image", "label"], axcodes="RAS"),
         Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
     ]

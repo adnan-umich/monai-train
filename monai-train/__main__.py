@@ -56,11 +56,11 @@ def load_data(data_dir: str, split: float, train_transforms, val_transforms, cac
 
     # Create training dataloader
     train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
-    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True, num_workers=workers)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=workers)
 
     # Create validation dataloader
     val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=cache_rate, num_workers=workers)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, num_workers=workers)
+    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers)
 
     return [train_loader, val_loader, train_ds]
 
@@ -109,17 +109,37 @@ def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:d
 
 def execute():
     # initialize a new Aim Run
+    try:
+        # Extracting variables
+        config = parse_args(create_parser())[0]['model']
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size = parse_args(create_parser())[1:]
+        model_type = config['type']
+        hyperparam = config['hyperparam']
+        optimizer_dict = config['optimizer']
+        metric_dict = config['metric']
+        loss_type =  config['metric']['type']
+        roi_size = config['validation_roi']
+        
+        # Creating a formatted print message
+        print("\n=== Training Configurations ===")
+        print(f"  Model Type       : {config['type']}")
+        print(f"  Hyperparameters  : {config['hyperparam']}")
+        print(f"  Optimizer        : {config['optimizer']}")
+        print(f"  Metric Type      : {config['metric']['type']}")
+        print(f"  Validation ROI   : {config['validation_roi']}")
+        print(f"  Data Directory   : {data_dir}")
+        print(f"  Output Directory : {output_dir}")
+        print(f"  Transfer Learning: {transfer_learning}")
+        print(f"  Split            : {split}")
+        print(f"  Learning Rate    : {learning_rate}")
+        print(f"  Max Epochs       : {max_epochs}")
+        print(f"  Batch Size       : {batch_size}")
+        print("=============================\n")
+    except:
+        print("Training configuration failed to load. Exiting.")
+
     device = torch.device("cuda:0")
     aim_run = aim.Run()
-    model_type = parse_args(create_parser())[0]['model']['type']
-    hyperparam = parse_args(create_parser())[0]['model']['hyperparam']
-    optimizer_dict = parse_args(create_parser())[0]['model']['optimizer']
-    learning_rate = parse_args(create_parser())[0]['model']['optimizer']['learning_rate']
-    batch_size = parse_args(create_parser())[0]['model']['batch_size']
-    metric_dict = parse_args(create_parser())[0]['model']['metric']
-    data_dir = parse_args(create_parser())[1]
-    output_dir = parse_args(create_parser())[2]
-    transfer_learning = parse_args(create_parser())[3]
 
     # Step 0
     if not os.path.exists(output_dir):
@@ -127,12 +147,9 @@ def execute():
         os.makedirs(output_dir, exist_ok=True)
 
     # Step 1
-    train_loader, val_loader, train_ds = load_data(data_dir, 0.8, train_transforms, val_transforms, 1.0, 4, batch_size=batch_size)
+    train_loader, val_loader, train_ds = load_data(data_dir, split, train_transforms, val_transforms, 1.0, 4, batch_size=batch_size)
     # Step 2
     model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
-    # Step 3
-    max_epochs = metric_dict = parse_args(create_parser())[0]['model']['epochs']
-    loss_type = parse_args(create_parser())[0]['model']['metric']['type']
 
     #### TRAINING STEPS BELOW ####
     val_interval = 2
@@ -144,7 +161,7 @@ def execute():
     post_label = Compose([AsDiscrete(to_onehot=2)])
 
     ### Transfer Learning ###
-    if len(transfer_learning) > 1:
+    if transfer_learning is not None:
         model.load_state_dict(torch.load(transfer_learning))
         model.eval()
 
@@ -198,7 +215,6 @@ def execute():
                         val_data["image"].to(device),
                         val_data["label"].to(device),
                     )
-                    roi_size = (48, 48, 48)
                     aim_run["validation_roi"] = roi_size
                     sw_batch_size = 4
                     val_outputs = sliding_window_inference(val_inputs, roi_size, sw_batch_size, model)
@@ -257,14 +273,14 @@ def execute():
         model.eval()
         with torch.no_grad():
             for i, val_data in enumerate(val_loader):
-                roi_size = (48, 48, 48) # used to be 160
                 sw_batch_size = 4
                 val_outputs = sliding_window_inference(val_data["image"].to(device), roi_size, sw_batch_size, model)
                 ### Plotly figure ###
-                vol = val_data["image"][0, 0, :, :, :].detach().cpu().numpy()
+
+                vol = val_data["image"][0, 0, :, :, :].detach().cpu()
                 mask = torch.argmax(val_outputs, dim=1).detach().cpu()[0, :, :, :]
 
-                volume = vol.T*mask.T
+                volume = vol.T * mask.T
                 r, c = volume[0].shape
                 nb_frames = volume.shape[2]
 
@@ -348,11 +364,13 @@ def execute():
 
                 ####################
 
-                aim_run.track(aim.Figure(fig), name=f"final_{index}")   
+                aim_run.track(aim.Figure(fig), name=f"test_prediction_{i}")   
                 plt.close()
         return None
-
-    inference_fig()
+    try:
+        inference_fig()
+    except:
+        print("Generate inference figures failed.")
 
     # finalize Aim Run
     aim_run.close()
@@ -374,10 +392,28 @@ def create_parser():
         dest='output_dir',
         type=str)
     g.add_argument(
+        '--split',
+        dest='split_percentage',
+        type=float)
+    g.add_argument(
+        '--lr',
+        dest='learning_rate',
+        default=0.0001,
+        type=float)
+    g.add_argument(
+        '--epochs',
+        dest='epochs',
+        default=100,
+        type=int)
+    g.add_argument(
+        '--batch',
+        dest='batch_size',
+        default=1,
+        type=int)
+    g.add_argument(
         '--transfer',
         dest='transfer_learning',
-        type=str,
-        default='')
+        type=str)
     return parser
 
 def parse_args(parser):
@@ -385,15 +421,27 @@ def parse_args(parser):
     if args.model_file:
         with open(args.model_file, 'r') as stream:
             model = yaml.safe_load(stream)
+
     if args.data_dir:
         data_dir = args.data_dir
     if args.output_dir:
         output_dir = args.output_dir
+    ###
+    if args.split_percentage:
+        split_percentage = args.split_percentage
+    if args.learning_rate:
+        learning_rate = args.learning_rate
+    if args.epochs:
+        epochs = args.epochs
+    if args.batch_size:
+        batch_size = args.batch_size
+    ###
     if args.transfer_learning:
-        output_dir = args.transfer_learning
+        transfer_learning = args.transfer_learning
     else:
-        transfer_learning = ''
-    return [model, data_dir, output_dir, transfer_learning]
+        transfer_learning = None
+
+    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size]
 
 
 if __name__ == "__main__":

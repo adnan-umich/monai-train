@@ -10,11 +10,10 @@ model:
     norm: "BATCH"
   optimizer:
     type: "Adam"
-    learning_rate: 0.0001
   metric:
     type: "DiceLoss"
     include_background: False
     softmax: True
     reduction: "mean"
-  batch_size: 1
-  epochs: 1500
+  validation_roi: [48, 48, 48]
+
