@@ -1,24 +1,34 @@
-### Installation 
-is done by using the [`poetry install`]:
+# Requirements 
+  * `python >= 3.9, <3.13`
+  * `cuda/12.x`
+  * `poetry`
+```
+(HPC) $ module load python cuda/12.1.1 poetry
+```
 
+# Installation 
 ```
-bash poetry install .
+  $ git clone git@github.com:adnan-umich/monai-train.git
+  $ cd monai-train
+  $ poetry install
 ```
 
-### Requirements 
-are `python` `cuda/12.x` `poetry`: 
-```
-module load python cuda/12.1.1 poetry
+```diff
++ this text is highlighted in green
+- this text is highlighted in red
 ```
 
 ### Quick start:
 ```
-python -m monai-train --model=./example/model_unet.yaml --data=/path/to/nifti/dataset \
-                      --output=/output \
-                      --split=0.8 \
-                      --lr=0.0001 \
-                      --epochs=20 \
-                      --batch=5
+  $ module load python cuda poetry
+  $ poetry shell
+  $ (monai-train-py3.11) python -m monai-train --model   = ./example/model_unet.yaml
+                                               --data    = /path/to/NIfTI/dataset \
+                                               --output  = /output \
+                                               --split   = 0.8 \
+                                               --lr      = 0.0001 \
+                                               --epochs  = 20 \
+                                               --batch   = 5
 ```
 
 ### Configurations
