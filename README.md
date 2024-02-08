@@ -1,3 +1,8 @@
+## Monai & Pytorch Pipeline with AimStack
+
+<img width="1478" alt="Screenshot 2024-02-07 at 11 37 39 PM" src="https://github.com/adnan-umich/monai-train/assets/124732717/6eefafb1-3af7-4e2c-a871-336097cd7b4f">
+
+
 # Requirements 
   * `python >= 3.9, <3.13`
   * `cuda/12.x`
