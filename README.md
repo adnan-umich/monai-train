@@ -24,7 +24,7 @@ python -m monai-train --model=./example/model_unet.yaml --data=/path/to/nifti/da
 ### Configurations
 ```
 --model : CNN model yaml file. 
---data: Location of the NIfTI dataset. It must contain a folder named imageTr,
+--data: Location of the NIfTI dataset. It must contain a folder named imagesTr,
         which holds the training images that have been labeled. Additionally,
         there should be a folder named labelsTr containing the corresponding labels for the training sets.
         Furthermore, there should be a folder named imagesTs that contains the test images, which are unlabeled.
