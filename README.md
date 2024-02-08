@@ -33,7 +33,9 @@
         which holds the training images that have been labeled. Additionally,
         there should be a folder named labelsTr containing the corresponding labels for the training sets.
         Furthermore, there should be a folder named imagesTs that contains the test images, which are unlabeled.
+--output: Location to save output data, such as trained model, and weights.
 --split : percentage of training set, remainder is validation set.
+--lr : learning rate
 --epochs : maximum number of epochs
 --batch : maximum batch size for the training set. Validation set to 1.
 --transfer (optional) : full path of pretrained model pickle file (.pth) for transfer learning.
