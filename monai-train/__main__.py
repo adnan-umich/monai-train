@@ -44,6 +44,48 @@ from .transformer import train_transforms, val_transforms
 
 
 def load_data(data_dir: str, split: float, train_transforms, val_transforms, cache_rate:float, workers: int, batch_size:int) -> list():
+    """
+    Load data for training and validation.
+
+    Args:
+        data_dir (str): Path to the directory containing the data.
+        split (float): Percentage of data to be used for training (0 to 1).
+        train_transforms: Transformations to be applied to training data.
+        val_transforms: Transformations to be applied to validation data.
+        cache_rate (float): Percentage of data to cache.
+        workers (int): Number of worker processes for data loading.
+        batch_size (int): Batch size for data loading.
+
+    Returns:
+        list: A list containing the training DataLoader, validation DataLoader, and training CacheDataset.
+    
+    Raises:
+        Exception: If the data directory or required folders do not exist, or if there are missing labels for images.
+
+    """
+    try:
+    # Check if data_dir exists
+    if not os.path.isdir(data_dir):
+        raise Exception(f"The directory '{data_dir}' does not exist.")
+
+    # Check for the presence of required folders
+    required_folders = ["imagesTr", "labelsTr", "imagesTs"]
+    for folder in required_folders:
+        if not os.path.isdir(os.path.join(data_dir, folder)):
+            raise Exception(f"The directory '{folder}' does not exist in '{data_dir}'.")
+
+    # Check if each image in imagesTr has a corresponding label in labelsTr
+    imagesTr_files = os.listdir(os.path.join(data_dir, "imagesTr"))
+    labelsTr_files = os.listdir(os.path.join(data_dir, "labelsTr"))
+    for image_file in imagesTr_files:
+        if image_file not in labelsTr_files:
+            raise Exception(f"No matching label found for the image '{image_file}' in 'labelsTr' folder.")
+
+    print("All conditions met.")
+
+    except Exception as e:
+        print("Error:", e)
+
     # Get list of training images, and their labels
     train_images = sorted(glob.glob(os.path.join(data_dir, "imagesTr", "*.nii.gz")))
     train_labels = sorted(glob.glob(os.path.join(data_dir, "labelsTr", "*.nii.gz")))
