@@ -64,25 +64,24 @@ def load_data(data_dir: str, split: float, train_transforms, val_transforms, cac
 
     """
     try:
-    # Check if data_dir exists
-    if not os.path.isdir(data_dir):
-        raise Exception(f"The directory '{data_dir}' does not exist.")
+        # Check if data_dir exists
+        if not os.path.isdir(data_dir):
+            raise Exception(f"The directory '{data_dir}' does not exist.")            
 
-    # Check for the presence of required folders
-    required_folders = ["imagesTr", "labelsTr", "imagesTs"]
-    for folder in required_folders:
-        if not os.path.isdir(os.path.join(data_dir, folder)):
-            raise Exception(f"The directory '{folder}' does not exist in '{data_dir}'.")
+        # Check for the presence of required folders
+        required_folders = ["imagesTr", "labelsTr", "imagesTs"]
+        for folder in required_folders:
+            if not os.path.isdir(os.path.join(data_dir, folder)):
+                raise Exception(f"The directory '{folder}' does not exist in '{data_dir}'.")
 
-    # Check if each image in imagesTr has a corresponding label in labelsTr
-    imagesTr_files = os.listdir(os.path.join(data_dir, "imagesTr"))
-    labelsTr_files = os.listdir(os.path.join(data_dir, "labelsTr"))
-    for image_file in imagesTr_files:
-        if image_file not in labelsTr_files:
-            raise Exception(f"No matching label found for the image '{image_file}' in 'labelsTr' folder.")
+        # Check if each image in imagesTr has a corresponding label in labelsTr
+        imagesTr_files = os.listdir(os.path.join(data_dir, "imagesTr"))
+        labelsTr_files = os.listdir(os.path.join(data_dir, "labelsTr"))
+        for image_file in imagesTr_files:
+            if image_file not in labelsTr_files:
+                raise Exception(f"No matching label found for the image '{image_file}' in 'labelsTr' folder.")
 
-    print("All conditions met.")
-
+        print("All conditions met.")
     except Exception as e:
         print("Error:", e)
 
