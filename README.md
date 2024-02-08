@@ -13,11 +13,6 @@
   $ poetry install
 ```
 
-```diff
-+ this text is highlighted in green
-- this text is highlighted in red
-```
-
 ### Quick start:
 ```
   $ module load python cuda poetry
