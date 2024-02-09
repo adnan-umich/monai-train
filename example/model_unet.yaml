@@ -4,8 +4,8 @@ model:
     spatial_dims: 3
     in_channels: 1
     out_channels: 2
-    channels:  [16, 32, 16, 8]
-    strides: [2, 2, 2, 2]
+    channels: [16, 32, 16, 8]
+    strides: [2, 2, 2]
     num_res_units: 2
     norm: "BATCH"
   optimizer:
@@ -16,5 +16,5 @@ model:
     softmax: True
     reduction: "mean"
   validation_roi: [48, 48, 48]
-  image_size: [48, 48, 48]
-  slice_to_track: 20
+  image_size: [96, 96, 96]
+  slice_to_track: 40

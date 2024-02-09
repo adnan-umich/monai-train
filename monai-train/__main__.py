@@ -29,6 +29,7 @@ from monai.transforms import (
     Rotate,
     Randomizable,
     Transform,
+    RandAffined,
 )
 from monai.handlers.utils import from_engine
 from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
@@ -43,7 +44,7 @@ from aim.pytorch import track_gradients_dists, track_params_dists
 from .transformer import mtrain_transforms
 
 
-def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple) -> list():
+def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple, roi_size:tuple) -> list():
     """
     Load data for training and validation.
 
@@ -96,7 +97,7 @@ def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch
     train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
 
     # get transformations
-    train_transforms, val_transforms = mtrain_transforms(image_size)
+    train_transforms, val_transforms = mtrain_transforms(image_size, roi_size=roi_size)
 
     # Create training dataloader
     train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
@@ -194,7 +195,7 @@ def execute():
         os.makedirs(output_dir, exist_ok=True)
 
     # Step 1
-    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size)
+    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
     # Step 2
     model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
 
@@ -251,17 +252,19 @@ def execute():
 
         #### val loss start
         step = 0
+        model.eval()
         for batch_data in val_loader:
             step += 1
             inputs, labels = (
                 batch_data["image"].to(device),
                 batch_data["label"].to(device),
             )
-            optimizer.zero_grad()
-            outputs = model(inputs)
+            #optimizer.zero_grad()
+            outputs = sliding_window_inference(inputs=inputs, roi_size=roi_size, sw_batch_size=4, predictor=model)
+            #outputs = model(inputs)
             _loss = loss_function(outputs, labels)
             _loss.backward()
-            optimizer.step()
+            #optimizer.step()
             val_loss += _loss.item()
             print(f"{step}/{len(val_ds) // val_loader.batch_size}, " f"validation_loss: {_loss.item():.4f}")
             # track batch loss metric

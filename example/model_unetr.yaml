@@ -20,5 +20,5 @@ model:
     softmax: True
     reduction: "mean"
   validation_roi: [128, 128, 128]
-  image_size: [48, 48, 48]
+  image_size: [128, 128, 128]
   slice_to_track: 60
