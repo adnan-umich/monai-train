@@ -40,10 +40,10 @@ from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
 from monai.apps import download_and_extract
 from aim.pytorch import track_gradients_dists, track_params_dists
-from .transformer import train_transforms, val_transforms
+from .transformer import mtrain_transforms
 
 
-def load_data(data_dir: str, split: float, train_transforms, val_transforms, cache_rate:float, workers: int, batch_size:int) -> list():
+def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple) -> list():
     """
     Load data for training and validation.
 
@@ -94,6 +94,9 @@ def load_data(data_dir: str, split: float, train_transforms, val_transforms, cac
     train_size = int(split * len(data_dicts))
     val_size = len(data_dicts) - train_size
     train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
+
+    # get transformations
+    train_transforms, val_transforms = mtrain_transforms(image_size)
 
     # Create training dataloader
     train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
@@ -160,6 +163,7 @@ def execute():
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
         roi_size = config['validation_roi']
+        image_size = config['image_size']
         slice_to_track = config['slice_to_track']
         
         # Creating a formatted print message
@@ -176,6 +180,7 @@ def execute():
         print(f"  Learning Rate    : {learning_rate}")
         print(f"  Max Epochs       : {max_epochs}")
         print(f"  Batch Size       : {batch_size}")
+        print(f"  Image Size       : {image_size}")
         print("=============================\n")
     except:
         print("Training configuration failed to load. Exiting.")
@@ -189,7 +194,7 @@ def execute():
         os.makedirs(output_dir, exist_ok=True)
 
     # Step 1
-    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, train_transforms, val_transforms, 1.0, 4, batch_size=batch_size)
+    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size)
     # Step 2
     model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
 
