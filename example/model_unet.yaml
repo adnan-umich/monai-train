@@ -15,5 +15,6 @@ model:
     include_background: False
     softmax: True
     reduction: "mean"
-  validation_roi: [48, 48, 48]
+  validation_roi: [128, 128, 128]
+  slice_to_track: 60
 
