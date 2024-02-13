@@ -14,11 +14,11 @@ model:
     res_block: True
   optimizer:
     type: "AdamW"
-    learning_rate: 0.00001
   metric:
     type: "DiceLoss"
     include_background: False
     softmax: True
     reduction: "mean"
-  batch_size: 1
-  epochs: 1500
+  validation_roi: [48, 48, 48]
+  image_size: [96, 96, 96]
+  slice_to_track: 20

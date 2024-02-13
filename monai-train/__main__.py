@@ -29,6 +29,7 @@ from monai.transforms import (
     Rotate,
     Randomizable,
     Transform,
+    RandAffined,
 )
 from monai.handlers.utils import from_engine
 from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
@@ -40,10 +41,10 @@ from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
 from monai.apps import download_and_extract
 from aim.pytorch import track_gradients_dists, track_params_dists
-from .transformer import train_transforms, val_transforms
+from .transformer import mtrain_transforms
 
 
-def load_data(data_dir: str, split: float, train_transforms, val_transforms, cache_rate:float, workers: int, batch_size:int) -> list():
+def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple, roi_size:tuple) -> list():
     """
     Load data for training and validation.
 
@@ -95,6 +96,9 @@ def load_data(data_dir: str, split: float, train_transforms, val_transforms, cac
     val_size = len(data_dicts) - train_size
     train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
 
+    # get transformations
+    train_transforms, val_transforms = mtrain_transforms(image_size, roi_size=roi_size)
+
     # Create training dataloader
     train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=workers)
@@ -103,7 +107,7 @@ def load_data(data_dir: str, split: float, train_transforms, val_transforms, cac
     val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=cache_rate, num_workers=workers)
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers)
 
-    return [train_loader, val_loader, train_ds]
+    return [train_loader, val_loader, train_ds, val_ds]
 
 def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:dict, learning_rate:float):
     model_type = model_type
@@ -160,6 +164,8 @@ def execute():
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
         roi_size = config['validation_roi']
+        image_size = config['image_size']
+        slice_to_track = config['slice_to_track']
         
         # Creating a formatted print message
         print("\n=== Training Configurations ===")
@@ -175,6 +181,7 @@ def execute():
         print(f"  Learning Rate    : {learning_rate}")
         print(f"  Max Epochs       : {max_epochs}")
         print(f"  Batch Size       : {batch_size}")
+        print(f"  Image Size       : {image_size}")
         print("=============================\n")
     except:
         print("Training configuration failed to load. Exiting.")
@@ -188,7 +195,7 @@ def execute():
         os.makedirs(output_dir, exist_ok=True)
 
     # Step 1
-    train_loader, val_loader, train_ds = load_data(data_dir, split, train_transforms, val_transforms, 1.0, 4, batch_size=batch_size)
+    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
     # Step 2
     model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
 
@@ -197,6 +204,7 @@ def execute():
     best_metric = -1
     best_metric_epoch = -1
     epoch_loss_values = []
+    val_loss_values = []
     metric_values = []
     post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
     post_label = Compose([AsDiscrete(to_onehot=2)])
@@ -210,13 +218,13 @@ def execute():
     aim_run["max_epochs"] = max_epochs
     # log batch size
     aim_run["batch_size"] = batch_size
-    slice_to_track = 20
 
     for epoch in range(max_epochs):
         print("-" * 10)
         print(f"epoch {epoch + 1}/{max_epochs}")
         model.train()
         epoch_loss = 0
+        val_loss = 0
         step = 0
         for batch_data in train_loader:
             step += 1
@@ -241,6 +249,32 @@ def execute():
         aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
 
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+
+        #### val loss start
+        step = 0
+        model.eval()
+        for batch_data in val_loader:
+            step += 1
+            inputs, labels = (
+                batch_data["image"].to(device),
+                batch_data["label"].to(device),
+            )
+            #optimizer.zero_grad()
+            outputs = sliding_window_inference(inputs=inputs, roi_size=roi_size, sw_batch_size=4, predictor=model)
+            #outputs = model(inputs)
+            _loss = loss_function(outputs, labels)
+            _loss.backward()
+            #optimizer.step()
+            val_loss += _loss.item()
+            print(f"{step}/{len(val_ds) // val_loader.batch_size}, " f"validation_loss: {_loss.item():.4f}")
+            # track batch loss metric
+            aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
+
+        val_loss /= step
+        val_loss_values.append(val_loss)
+
+        print(f"epoch {epoch + 1} average validation loss: {val_loss:.4f}")
+        #### val loss end
 
         if (epoch + 1) % val_interval == 0:
             if (epoch + 1) % val_interval * 2 == 0:
