@@ -39,10 +39,72 @@ from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
-from monai.apps import download_and_extract
+from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
-from .transformer import mtrain_transforms
+from .transformer import mtrain_transforms, kfold_transforms
+from abc import ABC, abstractmethod
 
+class CVDataset(ABC, CacheDataset):
+    """
+    Base class to generate cross validation datasets.
+
+    """
+    
+    def __init__(
+        self,
+        data,
+        transform,
+        cache_rate=1.0,
+        num_workers=4,
+    ) -> None:
+        data = self._split_datalist(datalist=data)
+        CacheDataset.__init__(
+            self, data, transform, cache_rate=cache_rate, num_workers=num_workers
+        )
+
+    @abstractmethod
+    def _split_datalist(self, datalist):
+        raise NotImplementedError(f"Subclass {self.__class__.__name__} must implement this method.")
+
+def get_data_dict(data_dir: str) -> list():
+    """
+    Return data list for kfold preparation
+
+    Args:
+        data_dir (str): Path to the directory containing the data.
+    
+    Returns:
+        list: A list containing all training & validation data.
+
+    """
+    try:
+        # Check if data_dir exists
+        if not os.path.isdir(data_dir):
+            raise Exception(f"The directory '{data_dir}' does not exist.")            
+
+        # Check for the presence of required folders
+        required_folders = ["imagesTr", "labelsTr", "imagesTs"]
+        for folder in required_folders:
+            if not os.path.isdir(os.path.join(data_dir, folder)):
+                raise Exception(f"The directory '{folder}' does not exist in '{data_dir}'.")
+
+        # Check if each image in imagesTr has a corresponding label in labelsTr
+        imagesTr_files = os.listdir(os.path.join(data_dir, "imagesTr"))
+        labelsTr_files = os.listdir(os.path.join(data_dir, "labelsTr"))
+        for image_file in imagesTr_files:
+            if image_file not in labelsTr_files:
+                raise Exception(f"No matching label found for the image '{image_file}' in 'labelsTr' folder.")
+
+        print("All conditions met.")
+    except Exception as e:
+        print("Error:", e)
+
+    # Get list of training images, and their labels
+    train_images = sorted(glob.glob(os.path.join(data_dir, "imagesTr", "*.nii.gz")))
+    train_labels = sorted(glob.glob(os.path.join(data_dir, "labelsTr", "*.nii.gz")))
+    data_dicts = [{"image": image_name, "label": label_name} for image_name, label_name in zip(train_images, train_labels)]
+
+    return data_dicts
 
 def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple, roi_size:tuple) -> list():
     """
@@ -153,11 +215,24 @@ def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:d
     return [model, loss_function, dice_metric, optimizer]
 
 def execute():
+    """ Check if we are using k-fold cross validation.
+    """
+
+    kfold = parse_args(create_parser())[-1]
+    if kfold is not None and kfold > 0:
+        print(f"A {kfold}-fold based training will start.")
+        kfold_training()
+    else:
+        print("Not using k-fold training")
+        train_no_kfold()
+
+# No change to train_no_kfold() since last major version.   
+def train_no_kfold():
     # initialize a new Aim Run
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         hyperparam = config['hyperparam']
         optimizer_dict = config['optimizer']
@@ -182,13 +257,15 @@ def execute():
         print(f"  Max Epochs       : {max_epochs}")
         print(f"  Batch Size       : {batch_size}")
         print(f"  Image Size       : {image_size}")
+        print(f"  No k-fold cross-valdiation")
+        print(f"  Seed             : {seed}")
         print("=============================\n")
     except:
         print("Training configuration failed to load. Exiting.")
 
     device = torch.device("cuda:0")
     aim_run = aim.Run()
-
+    set_determinism(seed=seed)
     # Step 0
     if not os.path.exists(output_dir):
         print(f'Output directory {output_dir} does not exist. Creating it.')
@@ -218,6 +295,8 @@ def execute():
     aim_run["max_epochs"] = max_epochs
     # log batch size
     aim_run["batch_size"] = batch_size
+    # log whether kfold, 0 indicates no kfold cross validation
+    aim_run["kfold"] = 0
 
     for epoch in range(max_epochs):
         print("-" * 10)
@@ -451,6 +530,215 @@ def execute():
     aim_run.close()
     print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
 
+def kfold_training():
+    # initialize a new Aim Run
+    try:
+        # Extracting variables
+        config = parse_args(create_parser())[0]['model']
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, kfold = parse_args(create_parser())[1:]
+        model_type = config['type']
+        hyperparam = config['hyperparam']
+        optimizer_dict = config['optimizer']
+        metric_dict = config['metric']
+        loss_type =  config['metric']['type']
+        roi_size = config['validation_roi']
+        image_size = config['image_size']
+        slice_to_track = config['slice_to_track']
+        
+        # Creating a formatted print message
+        print("\n=== Training Configurations ===")
+        print(f"  Model Type       : {config['type']}")
+        print(f"  Hyperparameters  : {config['hyperparam']}")
+        print(f"  Optimizer        : {config['optimizer']}")
+        print(f"  Metric Type      : {config['metric']['type']}")
+        print(f"  Validation ROI   : {config['validation_roi']}")
+        print(f"  Data Directory   : {data_dir}")
+        print(f"  Output Directory : {output_dir}")
+        print(f"  Transfer Learning: {transfer_learning}")
+        print(f"  Split            : {split}")
+        print(f"  Learning Rate    : {learning_rate}")
+        print(f"  Max Epochs       : {max_epochs}")
+        print(f"  Batch Size       : {batch_size}")
+        print(f"  Image Size       : {image_size}")
+        print(f"  {kfold}-fold cross-valdiation")
+        print(f"  Seed             : {seed}")
+        print("=============================\n")
+    except:
+        print("Training configuration failed to load. Exiting.")
+
+    device = torch.device("cuda:0")
+    aim_run = aim.Run()
+    set_determinism(seed=seed)
+    # Step 0
+    if not os.path.exists(output_dir):
+        print(f'Output directory {output_dir} does not exist. Creating it.')
+        os.makedirs(output_dir, exist_ok=True)
+
+    # Step 1
+    folds = list(range(kfold))
+
+    data_dicts = get_data_dict(data_dir)
+    # get transformations
+    train_transforms, val_transforms = kfold_transforms(image_size, roi_size=roi_size)
+
+    cvdataset = CrossValidation(
+        dataset_cls=CVDataset,
+        data=data_dicts,
+        nfolds=kfold,
+        seed=seed,
+        transform=train_transforms,
+    )
+
+    train_dss = [cvdataset.get_dataset(folds=folds[0:i] + folds[(i + 1) :]) for i in folds]
+    val_dss = [cvdataset.get_dataset(folds=i, transform=val_transforms) for i in range(kfold)]
+
+    train_loaders = [DataLoader(train_dss[i], batch_size=batch_size, shuffle=True, num_workers=4) for i in folds]
+    val_loaders = [DataLoader(val_dss[i], batch_size=1, num_workers=4) for i in folds]
+
+    #### TRAINING STEPS BELOW ####
+    def train(index):
+        print(f"=============== Training for fold {index} ===============")
+         # Step 2
+        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
+        val_interval = 2
+        best_metric = -1
+        best_metric_epoch = -1
+        epoch_loss_values = []
+        val_loss_values = []
+        metric_values = []
+        post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
+        post_label = Compose([AsDiscrete(to_onehot=2)])
+        
+        
+        # initialize a new Aim Run
+        #aim_run = aim.Run()
+        # log model metadata
+        #aim_run["Model_metadata"] = model_metadata
+        #aim_run["Model"] = model_type
+        # log optimizer metadata
+        #aim_run["Optimizer_metadata"] = Optimizer_metadata
+        
+        # log max epochs
+        #aim_run["max_epochs"] = max_epochs
+        
+        slice_to_track = 40
+        
+        for epoch in range(max_epochs):
+            print("-" * 10)
+            print(f"epoch {epoch + 1}/{max_epochs}")
+            model.train()
+            epoch_loss = 0
+            val_loss = 0
+            step = 0
+            for batch_data in train_loaders[index]:
+                step += 1
+                inputs, labels = (
+                    batch_data["image"].to(device),
+                    batch_data["label"].to(device),
+                )
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = loss_function(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+                print(f"{step}/{len(train_dss[index]) // train_loaders[index].batch_size}, " f"train_loss: {loss.item():.4f}")
+                # track batch loss metric
+                #aim_run.track(loss.item(), name="batch_loss", context={"type": loss_type})
+        
+            epoch_loss /= step
+            epoch_loss_values.append(epoch_loss)
+        
+            # track epoch loss metric
+            #aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
+        
+            print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+            #### val loss start
+            step = 0
+            for batch_data in val_loaders[index]:
+                step += 1
+                inputs, labels = (
+                    batch_data["image"].to(device),
+                    batch_data["label"].to(device),
+                )
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                _loss = loss_function(outputs, labels)
+                _loss.backward()
+                optimizer.step()
+                val_loss += _loss.item()
+                print(f"{step}/{len(val_dss[index]) // val_loaders[index].batch_size}, " f"validation_loss: {_loss.item():.4f}")
+                # track batch loss metric
+                #aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
+        
+            val_loss /= step
+            val_loss_values.append(val_loss)
+        
+            print(f"epoch {epoch + 1} average validation loss: {val_loss:.4f}")
+            #### val loss end
+            
+            if (epoch + 1) % val_interval == 0:
+        
+                model.eval()
+                with torch.no_grad():
+                    for index, val_data in enumerate(val_loaders[index]):
+                        val_inputs, val_labels = (
+                            val_data["image"].to(device),
+                            val_data["label"].to(device),
+                        )
+                        #aim_run["validation_roi"] = roi_size
+                        sw_batch_size = 4
+                        val_outputs = sliding_window_inference(val_inputs, roi_size, sw_batch_size, model)
+        
+                        # tracking input, label and output images with Aim
+                        output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+                        """
+                        aim_run.track(
+                            aim.Image(val_inputs[0, 0, :, :, slice_to_track], caption=f"Input Image: {index}"),
+                            name="validation",
+                            context={"type": "input"},
+                        )
+                        aim_run.track(
+                            aim.Image(val_labels[0, 0, :, :, slice_to_track], caption=f"Label Image: {index}"),
+                            name="validation",
+                            context={"type": "label"},
+                        )
+                        aim_run.track(
+                            aim.Image(output, caption=f"Predicted Label: {index}"),
+                            name="predictions",
+                            context={"type": "labels"},
+                        )
+                        """
+                        val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                        val_labels = [post_label(i) for i in decollate_batch(val_labels)]
+                        # compute metric for current iteration
+                        dice_metric(y_pred=val_outputs, y=val_labels)
+                    
+                    # aggregate the final mean dice result
+                    metric = dice_metric.aggregate().item()
+                    # track val metric
+                    #aim_run.track(metric, name="val_metric", context={"type": loss_type})
+        
+                    # reset the status for next validation round
+                    dice_metric.reset()
+        
+                    metric_values.append(metric)
+                    if metric > best_metric:
+                        best_metric = metric
+                        best_metric_epoch = epoch + 1        
+        
+                    message1 = f"current epoch: {epoch + 1} current mean dice: {metric:.4f}"
+                    message2 = f"\nbest mean dice: {best_metric:.4f} "
+                    message3 = f"at epoch: {best_metric_epoch}"
+        
+                    print(message1, message2, message3)
+        
+        # finalize Aim Run
+        #aim_run.close()
+        print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
+        return model
+    models = [train(i) for i in range(kfold)]
+
 def create_parser():
     parser = argparse.ArgumentParser()
     g = parser.add_argument_group('MONAI Targets')
@@ -469,7 +757,8 @@ def create_parser():
     g.add_argument(
         '--split',
         dest='split_percentage',
-        type=float)
+        type=float,
+        default=0.0)
     g.add_argument(
         '--lr',
         dest='learning_rate',
@@ -489,6 +778,15 @@ def create_parser():
         '--transfer',
         dest='transfer_learning',
         type=str)
+    g.add_argument(
+        '--kfold',
+        dest='kfold',
+        type=int)
+    g.add_argument(
+        '--seed',
+        dest='seed',
+        type=int, 
+        default=0)
     return parser
 
 def parse_args(parser):
@@ -502,21 +800,29 @@ def parse_args(parser):
     if args.output_dir:
         output_dir = args.output_dir
     ###
-    if args.split_percentage:
+    if args.split_percentage is not None:
         split_percentage = args.split_percentage
-    if args.learning_rate:
+    if args.learning_rate is not None:
         learning_rate = args.learning_rate
-    if args.epochs:
+    if args.epochs is not None:
         epochs = args.epochs
-    if args.batch_size:
+    if args.batch_size is not None:
         batch_size = args.batch_size
+    if args.kfold is not None:
+        kfold = args.kfold
+    else:
+        kfold = None
+    if args.seed is not None:
+        seed = args.seed
+    else:
+        seed = 0
     ###
     if args.transfer_learning:
         transfer_learning = args.transfer_learning
     else:
         transfer_learning = None
 
-    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size]
+    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, kfold]
 
 
 if __name__ == "__main__":
