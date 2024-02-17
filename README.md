@@ -28,7 +28,8 @@
                                                --split   = 0.8 \
                                                --lr      = 0.0001 \
                                                --epochs  = 20 \
-                                               --batch   = 5
+                                               --batch   = 5 \
+                                               --seed    = 12345
 ```
 
 ### Configurations
@@ -44,5 +45,7 @@
 --epochs : maximum number of epochs
 --batch : maximum batch size for the training set. Validation set to 1.
 --transfer (optional) : full path of pretrained model pickle file (.pth) for transfer learning.
+--seed : Sets the seed for generating random numbers. Default value 0. Can control reproducibility. 
+--kfold : (default 0, no cross validation. > 0 will trigger kfold cross validation based training.)
 ```
 
