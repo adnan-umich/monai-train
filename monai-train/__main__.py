@@ -234,7 +234,7 @@ def train_no_kfold():
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         hyperparam = config['hyperparam']
         optimizer_dict = config['optimizer']
@@ -537,7 +537,7 @@ def kfold_training():
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         hyperparam = config['hyperparam']
         optimizer_dict = config['optimizer']
@@ -740,7 +740,7 @@ def kfold_training():
     def save_model():
         # Reference: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         hyperparam = config['hyperparam']
         optimizer_dict = config['optimizer']
@@ -804,7 +804,8 @@ def kfold_training():
     models = [train(i) for i in range(kfold)]
     # finalize Aim Run
     aim_run.close()
-    save_model()
+    if savemodel == True:
+        save_model()
 
 def create_parser():
     parser = argparse.ArgumentParser()
@@ -825,7 +826,7 @@ def create_parser():
         '--split',
         dest='split_percentage',
         type=float,
-        default=0.0)
+        default=0.8)
     g.add_argument(
         '--lr',
         dest='learning_rate',
@@ -850,6 +851,10 @@ def create_parser():
         dest='kfold',
         type=int)
     g.add_argument(
+        '--savemodel',
+        dest='savemodel',
+        type=bool)
+    g.add_argument(
         '--seed',
         dest='seed',
         type=int, 
@@ -869,6 +874,8 @@ def parse_args(parser):
     ###
     if args.split_percentage is not None:
         split_percentage = args.split_percentage
+    else:
+        split_percentage = 0.8
     if args.learning_rate is not None:
         learning_rate = args.learning_rate
     if args.epochs is not None:
@@ -879,6 +886,10 @@ def parse_args(parser):
         kfold = args.kfold
     else:
         kfold = None
+    if args.savemodel is not None:
+        savemodel = args.savemodel
+    else:
+        savemodel = False
     if args.seed is not None:
         seed = args.seed
     else:
@@ -889,7 +900,7 @@ def parse_args(parser):
     else:
         transfer_learning = None
 
-    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, kfold]
+    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, savemodel, kfold]
 
 
 if __name__ == "__main__":

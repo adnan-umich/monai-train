@@ -29,7 +29,9 @@
                                                --lr      = 0.0001 \
                                                --epochs  = 20 \
                                                --batch   = 5 \
-                                               --seed    = 12345
+                                               --seed    = 12345 \
+					       --kfold   = 5 \
+			                       --savemodel = False
 ```
 
 ### Configurations
@@ -40,12 +42,13 @@
         there should be a folder named labelsTr containing the corresponding labels for the training sets.
         Furthermore, there should be a folder named imagesTs that contains the test images, which are unlabeled.
 --output: Location to save output data, such as trained model, and weights.
---split : percentage of training set, remainder is validation set.
+--split : percentage of training set, remainder is validation set. Default (80/20).
 --lr : learning rate
 --epochs : maximum number of epochs
 --batch : maximum batch size for the training set. Validation set to 1.
 --transfer (optional) : full path of pretrained model pickle file (.pth) for transfer learning.
 --seed : Sets the seed for generating random numbers. Default value 0. Can control reproducibility. 
 --kfold : (default 0, no cross validation. > 0 will trigger kfold cross validation based training.)
+--savemodel : (Default False), used with kfold cross validation. Indicates whether to run the final training with 100% training data for model saving. 
 ```
 
