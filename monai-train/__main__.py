@@ -201,17 +201,19 @@ def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:d
         optimizer = torch.optim.AdamW(model.parameters(), learning_rate, weight_decay=1e-5)
 
     # log model metadata
-    aim_run["Model_metadata"] = hyperparam
-    aim_run["Model"] = model_type
+    if aim_run is not None:
+        aim_run["Model_metadata"] = hyperparam
+        aim_run["Model"] = model_type
 
-    Optimizer_metadata = {}
-    for ind, param_group in enumerate(optimizer.param_groups):
-        optim_meta_keys = list(param_group.keys())
-        Optimizer_metadata[f"param_group_{ind}"] = {
-            key: value for (key, value) in param_group.items() if "params" not in key
-        }
-    # log optimizer metadata
-    aim_run["Optimizer_metadata"] = Optimizer_metadata
+        Optimizer_metadata = {}
+        for ind, param_group in enumerate(optimizer.param_groups):
+            optim_meta_keys = list(param_group.keys())
+            Optimizer_metadata[f"param_group_{ind}"] = {
+                key: value for (key, value) in param_group.items() if "params" not in key
+            }
+        # log optimizer metadata
+        aim_run["Optimizer_metadata"] = Optimizer_metadata
+
     return [model, loss_function, dice_metric, optimizer]
 
 def execute():
@@ -595,9 +597,16 @@ def kfold_training():
     train_loaders = [DataLoader(train_dss[i], batch_size=batch_size, shuffle=True, num_workers=4) for i in folds]
     val_loaders = [DataLoader(val_dss[i], batch_size=1, num_workers=4) for i in folds]
 
+    # log max epochs
+    aim_run["max_epochs"] = max_epochs
+    # log batch size
+    aim_run["batch_size"] = batch_size
+    # log whether kfold, 0 indicates no kfold cross validation
+    aim_run["kfold"] = kfold
+
     #### TRAINING STEPS BELOW ####
-    def train(index):
-        print(f"=============== Training for fold {index} ===============")
+    def train(fold):
+        print(f"=============== Training for fold {fold} ===============")
          # Step 2
         model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
         val_interval = 2
@@ -609,28 +618,21 @@ def kfold_training():
         post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
         post_label = Compose([AsDiscrete(to_onehot=2)])
         
-        
-        # initialize a new Aim Run
-        #aim_run = aim.Run()
-        # log model metadata
-        #aim_run["Model_metadata"] = model_metadata
-        #aim_run["Model"] = model_type
-        # log optimizer metadata
-        #aim_run["Optimizer_metadata"] = Optimizer_metadata
-        
-        # log max epochs
-        #aim_run["max_epochs"] = max_epochs
-        
         slice_to_track = 40
+
+        ### Transfer Learning ###
+        if transfer_learning is not None:
+            model.load_state_dict(torch.load(transfer_learning))
+            model.eval()
         
         for epoch in range(max_epochs):
             print("-" * 10)
-            print(f"epoch {epoch + 1}/{max_epochs}")
+            print(f"epoch {epoch + 1}/{max_epochs} of fold {fold}")
             model.train()
             epoch_loss = 0
             val_loss = 0
             step = 0
-            for batch_data in train_loaders[index]:
+            for batch_data in train_loaders[fold]:
                 step += 1
                 inputs, labels = (
                     batch_data["image"].to(device),
@@ -642,20 +644,20 @@ def kfold_training():
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
-                print(f"{step}/{len(train_dss[index]) // train_loaders[index].batch_size}, " f"train_loss: {loss.item():.4f}")
+                print(f"{step}/{len(train_dss[fold]) // train_loaders[fold].batch_size}, " f"train_loss: {loss.item():.4f}")
                 # track batch loss metric
-                #aim_run.track(loss.item(), name="batch_loss", context={"type": loss_type})
+                aim_run.track(loss.item(), name="batch_loss", context={"type": loss_type, 'kfold': fold})
         
             epoch_loss /= step
             epoch_loss_values.append(epoch_loss)
         
             # track epoch loss metric
-            #aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
+            aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type, 'kfold': fold})
         
             print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
             #### val loss start
             step = 0
-            for batch_data in val_loaders[index]:
+            for batch_data in val_loaders[fold]:
                 step += 1
                 inputs, labels = (
                     batch_data["image"].to(device),
@@ -667,9 +669,9 @@ def kfold_training():
                 _loss.backward()
                 optimizer.step()
                 val_loss += _loss.item()
-                print(f"{step}/{len(val_dss[index]) // val_loaders[index].batch_size}, " f"validation_loss: {_loss.item():.4f}")
+                print(f"{step}/{len(val_dss[fold]) // val_loaders[fold].batch_size}, " f"validation_loss: {_loss.item():.4f}")
                 # track batch loss metric
-                #aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
+                aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type, 'kfold': fold})
         
             val_loss /= step
             val_loss_values.append(val_loss)
@@ -681,34 +683,34 @@ def kfold_training():
         
                 model.eval()
                 with torch.no_grad():
-                    for index, val_data in enumerate(val_loaders[index]):
+                    for index, val_data in enumerate(val_loaders[fold]):
                         val_inputs, val_labels = (
                             val_data["image"].to(device),
                             val_data["label"].to(device),
                         )
-                        #aim_run["validation_roi"] = roi_size
+                        aim_run["validation_roi"] = roi_size
                         sw_batch_size = 4
                         val_outputs = sliding_window_inference(val_inputs, roi_size, sw_batch_size, model)
         
                         # tracking input, label and output images with Aim
                         output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
-                        """
+                        
                         aim_run.track(
                             aim.Image(val_inputs[0, 0, :, :, slice_to_track], caption=f"Input Image: {index}"),
                             name="validation",
-                            context={"type": "input"},
+                            context={"type": "input", 'kfold': fold},
                         )
                         aim_run.track(
                             aim.Image(val_labels[0, 0, :, :, slice_to_track], caption=f"Label Image: {index}"),
                             name="validation",
-                            context={"type": "label"},
+                            context={"type": "label", 'kfold': fold},
                         )
                         aim_run.track(
                             aim.Image(output, caption=f"Predicted Label: {index}"),
                             name="predictions",
-                            context={"type": "labels"},
+                            context={"type": "labels", 'kfold': fold},
                         )
-                        """
+                        
                         val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
                         val_labels = [post_label(i) for i in decollate_batch(val_labels)]
                         # compute metric for current iteration
@@ -717,7 +719,7 @@ def kfold_training():
                     # aggregate the final mean dice result
                     metric = dice_metric.aggregate().item()
                     # track val metric
-                    #aim_run.track(metric, name="val_metric", context={"type": loss_type})
+                    aim_run.track(metric, name="val_metric", context={"type": loss_type, 'kfold': fold})
         
                     # reset the status for next validation round
                     dice_metric.reset()
@@ -732,12 +734,77 @@ def kfold_training():
                     message3 = f"at epoch: {best_metric_epoch}"
         
                     print(message1, message2, message3)
-        
-        # finalize Aim Run
-        #aim_run.close()
         print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
         return model
+    
+    def save_model():
+        # Reference: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+        config = parse_args(create_parser())[0]['model']
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, kfold = parse_args(create_parser())[1:]
+        model_type = config['type']
+        hyperparam = config['hyperparam']
+        optimizer_dict = config['optimizer']
+        metric_dict = config['metric']
+        loss_type =  config['metric']['type']
+        roi_size = config['validation_roi']
+        image_size = config['image_size']
+        slice_to_track = config['slice_to_track']
+        device = torch.device("cuda:0")
+        set_determinism(seed=seed)
+        # Step 0
+        if not os.path.exists(output_dir):
+            print(f'Output directory {output_dir} does not exist. Creating it.')
+            os.makedirs(output_dir, exist_ok=True)
+
+        # Step 1
+        train_loader, val_loader, train_ds, val_ds = load_data(data_dir, 1.0, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
+
+        # Step 2
+        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
+
+        #### TRAINING STEPS BELOW ####
+        best_metric = -1
+        best_metric_epoch = -1
+        epoch_loss_values = []
+        metric_values = []
+        post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
+        post_label = Compose([AsDiscrete(to_onehot=2)])
+
+        ### Transfer Learning ###
+        if transfer_learning is not None:
+            model.load_state_dict(torch.load(transfer_learning))
+            model.eval()
+
+        for epoch in range(max_epochs):
+            print("-" * 10)
+            print(f"epoch {epoch + 1}/{max_epochs}")
+            model.train()
+            epoch_loss = 0
+            step = 0
+            for batch_data in train_loader:
+                step += 1
+                inputs, labels = (
+                    batch_data["image"].to(device),
+                    batch_data["label"].to(device),
+                )
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = loss_function(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+
+            epoch_loss /= step
+            epoch_loss_values.append(epoch_loss)
+
+        # Training complete.
+        torch.save(model.state_dict(), os.path.join(output_dir, "best_metric_model.pth"))
+        return None
+                
     models = [train(i) for i in range(kfold)]
+    # finalize Aim Run
+    aim_run.close()
+    save_model()
 
 def create_parser():
     parser = argparse.ArgumentParser()
