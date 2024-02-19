@@ -155,8 +155,8 @@ Use the following command to run monai-train:
                                              --epochs  = 20 \
                                              --batch   = 5 \
                                              --seed    = 12345 \
-					                         --kfold   = 5 \
-			                                 --savemodel = False
+					     --kfold   = 5 \
+					     --savemodel = False
 ```
 
 ###  Configurationd
