@@ -17,6 +17,7 @@
 <p align="center">
     <img src="https://img.shields.io/badge/PyTorch-2.2.0-EE4C2C.svg?style=flat&logo=pytorch" alt="PyTorch">
     <img src="https://img.shields.io/badge/MONAI-weekly-blue.svg?logo=MONAI-WEEKLY" alt="MONAI-Weekly">
+    <img src="https://img.shields.io/badge/Optuna-integrated-blue.svg?logo=OPTUNA-INTEGRATED" alt="Optuna-integrated">
 	<img src="https://img.shields.io/badge/YAML-CB171E.svg?style=flat&logo=YAML&logoColor=white" alt="YAML">
 	<img src="https://img.shields.io/badge/Poetry-60A5FA.svg?style=flat&logo=Poetry&logoColor=white" alt="Poetry">
 	<br>
