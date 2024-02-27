@@ -234,6 +234,6 @@ optuna:
 
 ##  License
 
-This project is protected under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License. For more details, refer to the [LICENSE](https://www.apache.org/licenses/LICENSE-2.0) file.
+This project is protected under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License. For more details, refer to the [LICENSE](./LICENSE) file.
 
 ---
