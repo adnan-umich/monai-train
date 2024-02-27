@@ -1,0 +1,22 @@
+model:
+  type: "UNet"
+  architecture:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 2
+    channels: [16, 32, 16, 8]
+    strides: [2, 2, 2]
+    num_res_units: 2
+    norm: "BATCH"
+  validation_roi: [48, 48, 48]
+  image_size: [96, 96, 96]
+  slice_to_track: 40
+optuna:
+  hyperparam:
+    learning_rate: [0.00001, 0.0001] # min, max
+    batch: [1, 5] # min, max
+    epoch: [300, 500] # min, max
+  settings:
+    trials: 100
+    sampling: "TPESampler" # Ref: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
+    split: 0.8 # Only used if kfold disabled. Default 0.8.

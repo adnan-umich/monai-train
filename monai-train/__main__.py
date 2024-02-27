@@ -171,20 +171,19 @@ def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch
 
     return [train_loader, val_loader, train_ds, val_ds]
 
-def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:dict, learning_rate:float):
+def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, metric:dict, learning_rate:float):
     model_type = model_type
     learning_rate = learning_rate
     metric_type = metric['type']
-    optimizer_type = optimizer['type']
     device = torch.device("cuda:0")
 
     ## MODEL ##
     if model_type == "UNet":
-        model = UNet(**hyperparam).to(device)
+        model = UNet(**architecture).to(device)
     elif model_type == "UNetr":
-        model = UNETR(**hyperparam).to(device)
+        model = UNETR(**architecture).to(device)
     elif model_type == "BasicUNet":
-        model = BasicUNet(**hyperparam).to(device)
+        model = BasicUNet(**architecture).to(device)
 
     ## EVALUATION METRIC ##
     if metric_type == "DiceLoss":
@@ -202,7 +201,7 @@ def gen_model(aim_run, model_type:str, hyperparam:dict, optimizer:dict, metric:d
 
     # log model metadata
     if aim_run is not None:
-        aim_run["Model_metadata"] = hyperparam
+        aim_run["Model_metadata"] = architecture
         aim_run["Model"] = model_type
 
         Optimizer_metadata = {}
@@ -236,7 +235,7 @@ def train_no_kfold():
         config = parse_args(create_parser())[0]['model']
         data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
-        hyperparam = config['hyperparam']
+        architecture = config['architecture']
         optimizer_dict = config['optimizer']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
@@ -247,7 +246,7 @@ def train_no_kfold():
         # Creating a formatted print message
         print("\n=== Training Configurations ===")
         print(f"  Model Type       : {config['type']}")
-        print(f"  Hyperparameters  : {config['hyperparam']}")
+        print(f"  Architecture  : {config['architecture']}")
         print(f"  Optimizer        : {config['optimizer']}")
         print(f"  Metric Type      : {config['metric']['type']}")
         print(f"  Validation ROI   : {config['validation_roi']}")
@@ -276,7 +275,7 @@ def train_no_kfold():
     # Step 1
     train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
     # Step 2
-    model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
+    model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate)
 
     #### TRAINING STEPS BELOW ####
     val_interval = 2
@@ -539,7 +538,7 @@ def kfold_training():
         config = parse_args(create_parser())[0]['model']
         data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
-        hyperparam = config['hyperparam']
+        architecture = config['architecture']
         optimizer_dict = config['optimizer']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
@@ -550,7 +549,7 @@ def kfold_training():
         # Creating a formatted print message
         print("\n=== Training Configurations ===")
         print(f"  Model Type       : {config['type']}")
-        print(f"  Hyperparameters  : {config['hyperparam']}")
+        print(f"  Architecture  : {config['architecture']}")
         print(f"  Optimizer        : {config['optimizer']}")
         print(f"  Metric Type      : {config['metric']['type']}")
         print(f"  Validation ROI   : {config['validation_roi']}")
@@ -569,7 +568,7 @@ def kfold_training():
         print("Training configuration failed to load. Exiting.")
 
     device = torch.device("cuda:0")
-    aim_run = aim.Run()
+    aim_run = aim.Run(experiment='Monai-Trainer')
     set_determinism(seed=seed)
     # Step 0
     if not os.path.exists(output_dir):
@@ -608,7 +607,7 @@ def kfold_training():
     def train(fold):
         print(f"=============== Training for fold {fold} ===============")
          # Step 2
-        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
+        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate)
         val_interval = 2
         best_metric = -1
         best_metric_epoch = -1
@@ -742,7 +741,7 @@ def kfold_training():
         config = parse_args(create_parser())[0]['model']
         data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
-        hyperparam = config['hyperparam']
+        architecture = config['architecture']
         optimizer_dict = config['optimizer']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
@@ -760,7 +759,7 @@ def kfold_training():
         train_loader, val_loader, train_ds, val_ds = load_data(data_dir, 1.0, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
 
         # Step 2
-        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, hyperparam, optimizer_dict, metric_dict, learning_rate)
+        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, architecture, optimizer_dict, metric_dict, learning_rate)
 
         #### TRAINING STEPS BELOW ####
         best_metric = -1

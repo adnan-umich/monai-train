@@ -17,6 +17,7 @@
 <p align="center">
     <img src="https://img.shields.io/badge/PyTorch-2.2.0-EE4C2C.svg?style=flat&logo=pytorch" alt="PyTorch">
     <img src="https://img.shields.io/badge/MONAI-weekly-blue.svg?logo=MONAI-WEEKLY" alt="MONAI-Weekly">
+    <img src="https://img.shields.io/badge/Optuna-integrated-blue.svg?logo=OPTUNA-INTEGRATED" alt="Optuna-integrated">
 	<img src="https://img.shields.io/badge/YAML-CB171E.svg?style=flat&logo=YAML&logoColor=white" alt="YAML">
 	<img src="https://img.shields.io/badge/Poetry-60A5FA.svg?style=flat&logo=Poetry&logoColor=white" alt="Poetry">
 	<br>
@@ -37,6 +38,7 @@
 > - [ Getting Started](#-getting-started)
 >   - [ Installation](#-installation)
 >   - [Running monai-train](#-running-monai-train)
+>   - [Hyperparameter Optimization monai-ops](#-running-monai-ops)
 > - [ Contributing](#-contributing)
 > - [ License](#-license)
 > - [ Acknowledgments](#-acknowledgments)
@@ -66,11 +68,15 @@
     ├── example
     │   ├── model_unet.yaml
     │   ├── model_unetr.yaml
-    │   └── transformer.yaml
+    │   ├── transformer.yaml
+    |   └── optuna_config.yaml
     ├── monai-train
     │   ├── __init__.py
     │   ├── __main__.py
     │   └── transformer.py
+    ├── monai-ops
+    │   ├── __init__.py
+    │   └── __main__.py
     ├── poetry.lock
     ├── pyproject.toml
     └── requirements.txt
@@ -87,6 +93,14 @@
 
 </details>
 
+<details closed><summary>monai-ops</summary>
+
+| File                                                                                                | Summary                         |
+| ---                                                                                                 | ---                             |
+| [__main__.py](https://github.com/adnan-umich/monai-train/blob/master/monai-train/__main__.py)       | <code>► main entrypoint for optuna based hyperparam optimization</code> |
+
+</details>
+
 <details closed><summary>example</summary>
 
 | File                                                                                                | Summary                         |
@@ -94,6 +108,7 @@
 | [model_unetr.yaml](https://github.com/adnan-umich/monai-train/blob/master/example/model_unetr.yaml) | <code>► example UNETr model</code> |
 | [model_unet.yaml](https://github.com/adnan-umich/monai-train/blob/master/example/model_unet.yaml)   | <code>► example UNet model</code> |
 | [transformer.yaml](https://github.com/adnan-umich/monai-train/blob/master/example/transformer.yaml) | <code>► example image processings</code> |
+| [optuna_config.yaml](https://github.com/adnan-umich/monai-train/blob/master/example/optuna_config.yaml) | <code>► Optuna experiment settings</code> |
 
 </details>
 
@@ -156,7 +171,7 @@ Use the following command to run monai-train:
 					     --savemodel = False
 ```
 
-###  Configurationd
+###  Monai-Train Configuration
 
 ```
 --model : CNN model yaml file. 
@@ -175,53 +190,50 @@ Use the following command to run monai-train:
 --savemodel : (Default False), used with kfold cross validation. Indicates whether to run the final training with 100% training data for model saving. 
 ```
 
-##  Contributing
+###  Running `monai-ops`
 
-Contributions are welcome! Here are several ways you can contribute:
+Use the following command to run monai-train:
 
-- **[Submit Pull Requests](https://github.com/adnan-umich/monai-train/blob/main/CONTRIBUTING.md)**: Review open PRs, and submit your own PRs.
-- **[Join the Discussions](https://github.com/adnan-umich/monai-train/discussions)**: Share your insights, provide feedback, or ask questions.
-- **[Report Issues](https://github.com/adnan-umich/monai-train/issues)**: Submit bugs found or log feature requests for the `monai-train` project.
+```sh
+> module load python cuda poetry
+> poetry shell
+> (monai-train-py3.11) python -m monai-ops --optuna ./example/optuna_config.yaml \
+                                           --data=/home/adnanzai/mice_data_v2 \
+                                           --output /home/adnanzai/optuna \
+                                           --seed 0
+```
 
-<details closed>
-    <summary>Contributing Guidelines</summary>
+###  Monai-Ops Configuration
 
-1. **Fork the Repository**: Start by forking the project repository to your github account.
-2. **Clone Locally**: Clone the forked repository to your local machine using a git client.
-   ```sh
-   git clone https://github.com/adnan-umich/monai-train
-   ```
-3. **Create a New Branch**: Always work on a new branch, giving it a descriptive name.
-   ```sh
-   git checkout -b new-feature-x
-   ```
-4. **Make Your Changes**: Develop and test your changes locally.
-5. **Commit Your Changes**: Commit with a clear message describing your updates.
-   ```sh
-   git commit -m 'Implemented new feature x.'
-   ```
-6. **Push to GitHub**: Push the changes to your forked repository.
-   ```sh
-   git push origin new-feature-x
-   ```
-7. **Submit a Pull Request**: Create a PR against the original project repository. Clearly describe the changes and their motivations.
-
-Once your PR is reviewed and approved, it will be merged into the main branch.
-
-</details>
+```
+model:
+  type: "UNet"
+  architecture:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 2
+    channels: [16, 32, 16, 8]
+    strides: [2, 2, 2]
+    num_res_units: 2
+    norm: "BATCH"
+  validation_roi: [48, 48, 48]
+  image_size: [96, 96, 96]
+  slice_to_track: 40
+optuna:
+  hyperparam:
+    learning_rate: [0.00001, 0.0001] # min, max
+    batch: [1, 5] # min, max
+    epoch: [300, 500] # min, max
+  settings:
+    trials: 100
+    sampling: "TPESampler" # Ref: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
+    split: 0.8 # Only used if kfold disabled. Default 0.8.
+```
 
 ---
 
 ##  License
 
-This project is protected under the [SELECT-A-LICENSE](https://choosealicense.com/licenses) License. For more details, refer to the [LICENSE](https://choosealicense.com/licenses/) file.
-
----
-
-##  Acknowledgments
-
-- List any resources, contributors, inspiration, etc. here.
-
-[**Return**](#-quick-links)
+This project is protected under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License. For more details, refer to the [LICENSE](./LICENSE) file.
 
 ---
