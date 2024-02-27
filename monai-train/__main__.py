@@ -568,7 +568,7 @@ def kfold_training():
         print("Training configuration failed to load. Exiting.")
 
     device = torch.device("cuda:0")
-    aim_run = aim.Run()
+    aim_run = aim.Run(experiment='Monai-Trainer')
     set_determinism(seed=seed)
     # Step 0
     if not os.path.exists(output_dir):

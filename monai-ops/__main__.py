@@ -13,6 +13,7 @@ import time
 import plotly.graph_objects as go
 import sys, importlib
 import optuna
+from optuna.visualization import plot_optimization_history, plot_parallel_coordinate, plot_slice, plot_param_importances, plot_pareto_front, plot_timeline
 from monai.transforms import (
     AsDiscrete,
     AsDiscreted,
@@ -44,89 +45,107 @@ from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
 from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
-from aim.optuna import AimCallback
 from abc import ABC, abstractmethod
 from optuna.trial import TrialState
 
-# Add the parent directory of monai-train and monai-ops to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-monai_train = "monai-train"
-mtrain = importlib.import_module(monai_train)
-
-# Aim logging in multirun mode.
-aim_callback = AimCallback(
-    as_multirun=True, experiment_name='monai-train hyperparam optimization'
-)
 
 def execute():
     optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
     set_determinism(seed=seed)
+    aim_run = aim.Run(experiment='Monai-Optuna MLOps')
 
     if not os.path.exists(output_dir):
         print(f'Output directory {output_dir} does not exist. Creating it.')
         os.makedirs(output_dir, exist_ok=True)
     
     if optuna_config['optuna']['settings']['sampling'] == "TPESampler":
-        sampler = optuna.samplers.TPESampler()
+        sampler = optuna.samplers.TPESampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "BaseSampler":
-        sampler = optuna.samplers.BaseSampler()
+        sampler = optuna.samplers.BaseSampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "GridSampler":
-        sampler = optuna.samplers.GridSampler()
+        sampler = optuna.samplers.GridSampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "RandomSampler":
-        sampler = optuna.samplers.RandomSampler()
+        sampler = optuna.samplers.RandomSampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "CmaEsSampler":
-        sampler = optuna.samplers.CmaEsSampler()
+        sampler = optuna.samplers.CmaEsSampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "PartialFixedSampler":
-        sampler = optuna.samplers.PartialFixedSampler()
+        sampler = optuna.samplers.PartialFixedSampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "NSGAIISampler":
-        sampler = optuna.samplers.NSGAIISampler()
+        sampler = optuna.samplers.NSGAIISampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "MOTPESampler":
-        sampler = optuna.samplers.MOTPESampler()
+        sampler = optuna.samplers.MOTPESampler(seed=seed)
     elif optuna_config['optuna']['settings']['sampling'] == "IntersectionSearchSpace":
-        sampler = optuna.samplers.IntersectionSearchSpace()
+        sampler = optuna.samplers.IntersectionSearchSpace(seed=seed)
 
-    # Determine whether kfold or not
-    if optuna_config['optuna']['settings']['kfold'] > 1:
-        print("kfold true")
-        # Ignore split
-    else:
-        study = optuna.create_study(sampler=sampler,directions=['maximize','minimize','minimize'])
-        study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[aim_callback])
-        complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
+    aim_run["Model"] = optuna_config['model']['type']
+    aim_run["Model_architecture"] = optuna_config['model']['architecture']
 
-        print("Study statistics: ")
-        print("  Number of finished trials: ", len(study.trials))
-        print("  Number of complete trials: ", len(complete_trials))
+    study = optuna.create_study(study_name="Monai-Optuna MLOps",sampler=sampler,directions=['maximize','minimize','minimize'])
+    study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'])
+    complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
 
-        print("\nPareto front:")
+    print("Study statistics: ")
+    print("  Number of finished trials: ", len(study.trials))
+    print("  Number of complete trials: ", len(complete_trials))
 
-        trials = sorted(study.best_trials, key=lambda t: t.values)
+    print("\nPareto front:")
 
-        for trial in trials:
-            print("  Trial#{}".format(trial.number))
-            print("    Values: Mean DICE score={}, Average Training Loss={}, Average Validation Loss={}".format(trial.values[0], trial.values[1], trial.values[2]))
-            print("    Params: {}".format(trial.params))
+    trials = sorted(study.best_trials, key=lambda t: t.values)
 
-        trial_with_highest_dice = max(study.best_trials, key=lambda t: t.values[0])
-        print(f"\nTrial with highest mean dice score: ")
-        print(f"\tnumber: {trial_with_highest_dice.number}")
-        print(f"\tparams: {trial_with_highest_dice.params}")
-        print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_highest_dice.values}")
+    for trial in trials:
+        print("  Trial#{}".format(trial.number))
+        print("    Values: Mean DICE score={}, Average Training Loss={}, Average Validation Loss={}".format(trial.values[0], trial.values[1], trial.values[2]))
+        print("    Params: {}".format(trial.params))
 
-        trial_with_lowest_training_loss = min(study.best_trials, key=lambda t: t.values[1])
-        print(f"\nTrial with lowest average training loss: ")
-        print(f"\tnumber: {trial_with_lowest_training_loss.number}")
-        print(f"\tparams: {trial_with_lowest_training_loss.params}")
-        print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_lowest_training_loss.values}")
+    trial_with_highest_dice = max(study.best_trials, key=lambda t: t.values[0])
+    print(f"\nTrial with highest mean dice score: ")
+    print(f"\tnumber: {trial_with_highest_dice.number}")
+    print(f"\tparams: {trial_with_highest_dice.params}")
+    print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_highest_dice.values}")
 
-        trial_with_lowest_validation_loss = min(study.best_trials, key=lambda t: t.values[2])
-        print(f"\nTrial with lowest average validation loss: ")
-        print(f"\tnumber: {trial_with_lowest_validation_loss.number}")
-        print(f"\tparams: {trial_with_lowest_validation_loss.params}")
-        print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_lowest_validation_loss.values}")
+    trial_with_lowest_training_loss = min(study.best_trials, key=lambda t: t.values[1])
+    print(f"\nTrial with lowest average training loss: ")
+    print(f"\tnumber: {trial_with_lowest_training_loss.number}")
+    print(f"\tparams: {trial_with_lowest_training_loss.params}")
+    print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_lowest_training_loss.values}")
+
+    trial_with_lowest_validation_loss = min(study.best_trials, key=lambda t: t.values[2])
+    print(f"\nTrial with lowest average validation loss: ")
+    print(f"\tnumber: {trial_with_lowest_validation_loss.number}")
+    print(f"\tparams: {trial_with_lowest_validation_loss.params}")
+    print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_lowest_validation_loss.values}")
+    
+    # Record figures
+
+    aim_run.track(aim.Figure(plot_optimization_history(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Optimization History Plot")
+    
+    fig = plot_parallel_coordinate(study, target=lambda t: t.values[0], target_name="Mean DICE")
+    fig['layout']['height'] = 400
+    fig['layout']['width'] = 1200
+    aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Mean DICE"}) 
+    
+    fig = plot_parallel_coordinate(study, target=lambda t: t.values[1], target_name="Average Loss")   
+    fig['layout']['height'] = 400
+    fig['layout']['width'] = 1200
+    aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Training Loss"})
+    
+    fig = plot_parallel_coordinate(study, target=lambda t: t.values[2], target_name="Validation Loss")
+    fig['layout']['height'] = 400
+    fig['layout']['width'] = 1200
+    aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Validation Loss"})
+
+    aim_run.track(aim.Figure(plot_slice(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Plot Slice")   
+    aim_run.track(aim.Figure(plot_param_importances(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Parameter Importance")   
+    aim_run.track(aim.Figure(plot_timeline(study)), name=f"Plot Timeline")
+
+    fig = optuna.visualization.plot_pareto_front(study)
+    fig['layout']['height'] = 800
+    fig['layout']['width'] = 1200
+    aim_run.track(aim.Figure(fig), name=f"Pareto Front") 
+
+    aim_run.close()
     return None
 
-@aim_callback.track_in_aim()
 def nokfold_objective_training(trial):
     optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
     slice_to_track = optuna_config['model']['slice_to_track']
@@ -137,12 +156,6 @@ def nokfold_objective_training(trial):
     batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=True)
     optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
     loss_type = trial.suggest_categorical("loss_func", ["DiceLoss", "DiceCELoss"])
-
-    aim_callback.experiment.track_auto(n_epochs, name='max_epochs')
-    aim_callback.experiment.track_auto(lr, name='learning_rate')
-    aim_callback.experiment.track_auto(batch, name='batch_size')
-    aim_callback.experiment.track_auto(optimizer_type, name='optimizer_type')
-    aim_callback.experiment.track_auto(loss_type, name='loss_type')
     ## Load Data
     try:
         # Check if data_dir exists
@@ -190,8 +203,6 @@ def nokfold_objective_training(trial):
 
     ## Generate model, loss function, optimizers    
     model_type = optuna_config['model']['type']
-    aim_callback.experiment.track_auto(model_type, name='model_type')
-    aim_callback.experiment.track_auto(optuna_config['model']['architecture'], name='model_architecture')
     metric_type = loss_type
 
     ## MODEL ##
@@ -234,8 +245,6 @@ def nokfold_objective_training(trial):
     post_label = Compose([AsDiscrete(to_onehot=2)])
 
     for epoch in range(n_epochs):
-        print("-" * 10)
-        print(f"epoch {epoch + 1}/{n_epochs}")
         model.train()
         epoch_loss = 0
         val_loss = 0
@@ -252,12 +261,9 @@ def nokfold_objective_training(trial):
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-            print(f"{step}/{len(train_ds) // train_loader.batch_size}, " f"train_loss: {loss.item():.4f}")
 
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
-
-        print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
 
         #### val loss start
         step = 0
@@ -275,12 +281,9 @@ def nokfold_objective_training(trial):
             _loss.backward()
             #optimizer.step()
             val_loss += _loss.item()
-            print(f"{step}/{len(val_ds) // val_loader.batch_size}, " f"validation_loss: {_loss.item():.4f}")
 
         val_loss /= step
         val_loss_values.append(val_loss)
-
-        print(f"epoch {epoch + 1} average validation loss: {val_loss:.4f}")
         #### val loss end
 
         if (epoch + 1) % val_interval == 0:
@@ -311,24 +314,17 @@ def nokfold_objective_training(trial):
                 if metric > best_metric:
                     best_metric = metric
                     best_metric_epoch = epoch + 1
-                    torch.save(model.state_dict(), os.path.join(output_dir, f"max_epochs{n_epochs}_lr{lr}_batch{batch}__model.pth"))
+                    #torch.save(model.state_dict(), os.path.join(output_dir, f"max_epochs{n_epochs}_lr{lr}_batch{batch}__model.pth"))
 
-                    best_model_log_message = f"saved new best metric model at the {epoch+1}th epoch"
-                    print(best_model_log_message)
+                    #best_model_log_message = f"saved new best metric model at the {epoch+1}th epoch"
+                    #print(best_model_log_message)
 
                 message1 = f"current epoch: {epoch + 1} current mean dice: {metric:.4f}"
                 message2 = f"\nbest mean dice: {best_metric:.4f} "
                 message3 = f"at epoch: {best_metric_epoch}"
 
-                print(message1, message2, message3)
-
-    aim_callback.experiment.track_auto(val_loss, name='average validation_loss')
-    aim_callback.experiment.track_auto(epoch_loss, name='average training_loss')
-    aim_callback.experiment.track_auto(best_metric, name='mean dice_score')
+                #print(message1, message2, message3)
     return best_metric, epoch_loss, val_loss
-
-def kfold_objective_training(trial):
-    return None
 
 def create_parser():
     parser = argparse.ArgumentParser()
@@ -371,4 +367,8 @@ def parse_args(parser):
 
 
 if __name__ == "__main__":
+    # Add the parent directory of monai-train and monai-ops to the Python path
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    monai_train = "monai-train"
+    mtrain = importlib.import_module(monai_train)
     execute()
