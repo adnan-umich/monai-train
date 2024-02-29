@@ -175,7 +175,7 @@ def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, me
     model_type = model_type
     learning_rate = learning_rate
     metric_type = metric['type']
-    device = torch.device("cuda:0")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ## MODEL ##
     if model_type == "UNet":
@@ -264,7 +264,8 @@ def train_no_kfold():
     except:
         print("Training configuration failed to load. Exiting.")
 
-    device = torch.device("cuda:0")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     aim_run = aim.Run()
     set_determinism(seed=seed)
     # Step 0
@@ -567,7 +568,8 @@ def kfold_training():
     except:
         print("Training configuration failed to load. Exiting.")
 
-    device = torch.device("cuda:0")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")    
     aim_run = aim.Run(experiment='Monai-Trainer')
     set_determinism(seed=seed)
     # Step 0
@@ -748,7 +750,7 @@ def kfold_training():
         roi_size = config['validation_roi']
         image_size = config['image_size']
         slice_to_track = config['slice_to_track']
-        device = torch.device("cuda:0")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         set_determinism(seed=seed)
         # Step 0
         if not os.path.exists(output_dir):
