@@ -1,4 +1,3 @@
-
 import yaml
 import torch
 import aim
@@ -48,6 +47,50 @@ from aim.pytorch import track_gradients_dists, track_params_dists
 from abc import ABC, abstractmethod
 from optuna.trial import TrialState
 
+class Gen_Figures(object):
+        # Record figures
+        def __init__(self, aim_run):
+            self.callback_data = None
+            self.aim_run = aim_run
+
+        def __call__(self, study, trial):
+            self.callback_data = None
+            try:
+                aim_run = self.aim_run
+                aim_run.track(aim.Figure(plot_optimization_history(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Optimization History Plot")
+            
+                fig = plot_parallel_coordinate(study, target=lambda t: t.values[0], target_name="Mean DICE")
+                fig['layout']['height'] = 400
+                fig['layout']['width'] = 1200
+                # flip the colourbar
+                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
+                fig.data[0].line.colorscale = 'purpor'
+                aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Mean DICE"}) 
+                
+                fig = plot_parallel_coordinate(study, target=lambda t: t.values[1], target_name="Average Loss")   
+                fig['layout']['height'] = 400
+                fig['layout']['width'] = 1200
+                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
+                fig.data[0].line.colorscale = 'purpor'
+                aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Training Loss"})
+                
+                fig = plot_parallel_coordinate(study, target=lambda t: t.values[2], target_name="Validation Loss")
+                fig['layout']['height'] = 400
+                fig['layout']['width'] = 1200
+                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
+                fig.data[0].line.colorscale = 'purpor'
+                aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Validation Loss"})
+
+                aim_run.track(aim.Figure(plot_slice(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Plot Slice")   
+                aim_run.track(aim.Figure(plot_param_importances(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Parameter Importance")   
+                aim_run.track(aim.Figure(plot_timeline(study)), name=f"Plot Timeline")
+
+                fig = optuna.visualization.plot_pareto_front(study)
+                fig['layout']['height'] = 800
+                fig['layout']['width'] = 1200
+                aim_run.track(aim.Figure(fig), name=f"Pareto Front")
+            except:
+                return None
 
 def execute():
     optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
@@ -79,9 +122,11 @@ def execute():
 
     aim_run["Model"] = optuna_config['model']['type']
     aim_run["Model_architecture"] = optuna_config['model']['architecture']
+    aim_run["Optuna_settings"] = optuna_config['optuna'] 
 
     study = optuna.create_study(study_name="Monai-Optuna MLOps",sampler=sampler,directions=['maximize','minimize','minimize'])
-    study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'])
+    gen_figures = Gen_Figures(aim_run)
+    study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
 
     print("Study statistics: ")
@@ -114,34 +159,6 @@ def execute():
     print(f"\tnumber: {trial_with_lowest_validation_loss.number}")
     print(f"\tparams: {trial_with_lowest_validation_loss.params}")
     print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_lowest_validation_loss.values}")
-    
-    # Record figures
-
-    aim_run.track(aim.Figure(plot_optimization_history(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Optimization History Plot")
-    
-    fig = plot_parallel_coordinate(study, target=lambda t: t.values[0], target_name="Mean DICE")
-    fig['layout']['height'] = 400
-    fig['layout']['width'] = 1200
-    aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Mean DICE"}) 
-    
-    fig = plot_parallel_coordinate(study, target=lambda t: t.values[1], target_name="Average Loss")   
-    fig['layout']['height'] = 400
-    fig['layout']['width'] = 1200
-    aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Training Loss"})
-    
-    fig = plot_parallel_coordinate(study, target=lambda t: t.values[2], target_name="Validation Loss")
-    fig['layout']['height'] = 400
-    fig['layout']['width'] = 1200
-    aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Validation Loss"})
-
-    aim_run.track(aim.Figure(plot_slice(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Plot Slice")   
-    aim_run.track(aim.Figure(plot_param_importances(study, target=lambda t: t.values[0], target_name="Mean DICE")), name=f"Parameter Importance")   
-    aim_run.track(aim.Figure(plot_timeline(study)), name=f"Plot Timeline")
-
-    fig = optuna.visualization.plot_pareto_front(study)
-    fig['layout']['height'] = 800
-    fig['layout']['width'] = 1200
-    aim_run.track(aim.Figure(fig), name=f"Pareto Front") 
 
     aim_run.close()
     return None
@@ -149,8 +166,7 @@ def execute():
 def nokfold_objective_training(trial):
     optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
     slice_to_track = optuna_config['model']['slice_to_track']
-
-    device = torch.device("cuda:0")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_epochs = trial.suggest_int('epochs', optuna_config['optuna']['hyperparam']['epoch'][0], optuna_config['optuna']['hyperparam']['epoch'][1])
     lr = trial.suggest_float("lr", optuna_config['optuna']['hyperparam']['learning_rate'][0], optuna_config['optuna']['hyperparam']['learning_rate'][1], log=True)
     batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=True)
