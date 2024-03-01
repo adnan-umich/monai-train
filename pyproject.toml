@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "monai-train"
-version = "0.1.1"
+version = "1.0.0"
 description = "training and inference pipeline utilizing the MONAI and Pytorch frameworks"
 authors = ["Adnan Hafeez"]
 readme = "README.md"

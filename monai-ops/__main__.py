@@ -38,7 +38,7 @@ from monai.handlers.utils import from_engine
 from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
 from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
-from monai.losses import DiceLoss, DiceCELoss
+from monai.losses import DiceLoss, DiceCELoss, MaskedDiceLoss, GeneralizedDiceLoss, FocalLoss, TverskyLoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
@@ -70,14 +70,12 @@ class Gen_Figures(object):
                 fig = plot_parallel_coordinate(study, target=lambda t: t.values[1], target_name="Average Loss")   
                 fig['layout']['height'] = 400
                 fig['layout']['width'] = 1200
-                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
                 fig.data[0].line.colorscale = 'purpor'
                 aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Training Loss"})
                 
                 fig = plot_parallel_coordinate(study, target=lambda t: t.values[2], target_name="Validation Loss")
                 fig['layout']['height'] = 400
                 fig['layout']['width'] = 1200
-                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
                 fig.data[0].line.colorscale = 'purpor'
                 aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Validation Loss"})
 
@@ -169,9 +167,12 @@ def nokfold_objective_training(trial):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_epochs = trial.suggest_int('epochs', optuna_config['optuna']['hyperparam']['epoch'][0], optuna_config['optuna']['hyperparam']['epoch'][1])
     lr = trial.suggest_float("lr", optuna_config['optuna']['hyperparam']['learning_rate'][0], optuna_config['optuna']['hyperparam']['learning_rate'][1], log=True)
+    b1 = trial.suggest_float("beta_1", optuna_config['optuna']['hyperparam']['beta_1'][0], optuna_config['optuna']['hyperparam']['beta_1'][1], log=False)
+    b2 = trial.suggest_float("beta_2", optuna_config['optuna']['hyperparam']['beta_2'][0], optuna_config['optuna']['hyperparam']['beta_2'][1], log=False)
+    weight_decay = trial.suggest_float("weight_decay", optuna_config['optuna']['hyperparam']['weight_decay'][0], optuna_config['optuna']['hyperparam']['weight_decay'][1], log=False)
     batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=True)
     optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
-    loss_type = trial.suggest_categorical("loss_func", ["DiceLoss", "DiceCELoss"])
+    loss_type = trial.suggest_categorical("loss_func", ["DiceLoss", "DiceCELoss", "MaskedDiceLoss", "GeneralizedDiceLoss", "FocalLoss", "TverskyLoss"])
     ## Load Data
     try:
         # Check if data_dir exists
@@ -236,12 +237,24 @@ def nokfold_objective_training(trial):
     elif metric_type == "DiceCELoss":
         loss_function = DiceCELoss(to_onehot_y=True, softmax=True)
         dice_metric = DiceMetric(include_background=True, reduction="mean")
+    elif metric_type == "MaskedDiceLoss":
+        loss_function = MaskedDiceLoss(to_onehot_y=True, softmax=True)
+        dice_metric = DiceMetric(include_background=True, reduction="mean")
+    elif metric_type == "GeneralizedDiceLoss":
+        loss_function = GeneralizedDiceLoss(to_onehot_y=True, softmax=True)
+        dice_metric = DiceMetric(include_background=True, reduction="mean")
+    elif metric_type == "FocalLoss":
+        loss_function = FocalLoss(to_onehot_y=True, use_softmax=True)
+        dice_metric = DiceMetric(include_background=True, reduction="mean")
+    elif metric_type == "TverskyLoss":
+        loss_function = TverskyLoss(to_onehot_y=True, softmax=True)
+        dice_metric = DiceMetric(include_background=True, reduction="mean")
 
     ## OPTIMIZATION ##
     if optimizer_type == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
     elif optimizer_type == "AdamW":
-        optimizer = torch.optim.AdamW(model.parameters(), lr, weight_decay=1e-5)
+        optimizer = torch.optim.AdamW(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
 
     Optimizer_metadata = {}
     for ind, param_group in enumerate(optimizer.param_groups):
