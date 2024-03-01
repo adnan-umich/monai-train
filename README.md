@@ -224,6 +224,9 @@ optuna:
     learning_rate: [0.00001, 0.0001] # min, max
     batch: [1, 5] # min, max
     epoch: [300, 500] # min, max
+    beta_1: [0.85, 0.999] # min, max
+    beta_2: [0.85, 0.999] # min, max
+    weight_decay: [0, 0.000001] # min, max
   settings:
     trials: 100
     sampling: "TPESampler" # Ref: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
