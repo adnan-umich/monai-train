@@ -11,6 +11,7 @@ import argparse
 import time
 import plotly.graph_objects as go
 import sys, importlib
+import monai.losses
 import optuna
 from optuna.visualization import plot_optimization_history, plot_parallel_coordinate, plot_slice, plot_param_importances, plot_pareto_front, plot_timeline
 from monai.transforms import (
@@ -38,7 +39,6 @@ from monai.handlers.utils import from_engine
 from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
 from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
-from monai.losses import DiceLoss, DiceCELoss, MaskedDiceLoss, GeneralizedDiceLoss, FocalLoss, TverskyLoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
@@ -46,6 +46,7 @@ from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
 from abc import ABC, abstractmethod
 from optuna.trial import TrialState
+
 
 class Gen_Figures(object):
         # Record figures
@@ -121,12 +122,12 @@ def execute():
     aim_run["Model"] = optuna_config['model']['type']
     aim_run["Model_architecture"] = optuna_config['model']['architecture']
     aim_run["Optuna_settings"] = optuna_config['optuna'] 
-
+    
     study = optuna.create_study(study_name="Monai-Optuna MLOps",sampler=sampler,directions=['maximize','minimize','minimize'])
     gen_figures = Gen_Figures(aim_run)
     study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
-
+    
     print("Study statistics: ")
     print("  Number of finished trials: ", len(study.trials))
     print("  Number of complete trials: ", len(complete_trials))
@@ -231,30 +232,17 @@ def nokfold_objective_training(trial):
         model = BasicUNet(**optuna_config['model']['architecture']).to(device)
 
     ## EVALUATION METRIC ##
-    if metric_type == "DiceLoss":
-        loss_function = DiceLoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
-    elif metric_type == "DiceCELoss":
-        loss_function = DiceCELoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
-    elif metric_type == "MaskedDiceLoss":
-        loss_function = MaskedDiceLoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
-    elif metric_type == "GeneralizedDiceLoss":
-        loss_function = GeneralizedDiceLoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
-    elif metric_type == "FocalLoss":
-        loss_function = FocalLoss(to_onehot_y=True, use_softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
-    elif metric_type == "TverskyLoss":
-        loss_function = TverskyLoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
+    
+    if metric_type == "FocalLoss":
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+    else:
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
+    
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
+
 
     ## OPTIMIZATION ##
-    if optimizer_type == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
-    elif optimizer_type == "AdamW":
-        optimizer = torch.optim.AdamW(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
+    optimizer = getattr(torch.optim, optimizer_type)(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
 
     Optimizer_metadata = {}
     for ind, param_group in enumerate(optimizer.param_groups):
