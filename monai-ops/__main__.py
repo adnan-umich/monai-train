@@ -12,6 +12,7 @@ import time
 import plotly.graph_objects as go
 import sys, importlib
 import monai.losses
+import monai.networks.nets
 import optuna
 from optuna.visualization import plot_optimization_history, plot_parallel_coordinate, plot_slice, plot_param_importances, plot_pareto_front, plot_timeline
 from monai.transforms import (
@@ -36,7 +37,6 @@ from monai.transforms import (
 )
 from monai.utils import first, set_determinism
 from monai.handlers.utils import from_engine
-from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
 from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
 from monai.inferers import sliding_window_inference
@@ -100,25 +100,8 @@ def execute():
         print(f'Output directory {output_dir} does not exist. Creating it.')
         os.makedirs(output_dir, exist_ok=True)
     
-    if optuna_config['optuna']['settings']['sampling'] == "TPESampler":
-        sampler = optuna.samplers.TPESampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "BaseSampler":
-        sampler = optuna.samplers.BaseSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "GridSampler":
-        sampler = optuna.samplers.GridSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "RandomSampler":
-        sampler = optuna.samplers.RandomSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "CmaEsSampler":
-        sampler = optuna.samplers.CmaEsSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "PartialFixedSampler":
-        sampler = optuna.samplers.PartialFixedSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "NSGAIISampler":
-        sampler = optuna.samplers.NSGAIISampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "MOTPESampler":
-        sampler = optuna.samplers.MOTPESampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "IntersectionSearchSpace":
-        sampler = optuna.samplers.IntersectionSearchSpace(seed=seed)
-
+    sampler = getattr(optuna.samplers, optuna_config['optuna']['settings']['sampling'])(seed=seed)
+    
     aim_run["Model"] = optuna_config['model']['type']
     aim_run["Model_architecture"] = optuna_config['model']['architecture']
     aim_run["Optuna_settings"] = optuna_config['optuna'] 
@@ -224,15 +207,9 @@ def nokfold_objective_training(trial):
     metric_type = loss_type
 
     ## MODEL ##
-    if model_type == "UNet":
-        model = UNet(**optuna_config['model']['architecture']).to(device)
-    elif model_type == "UNetr":
-        model = UNETR(**optuna_config['model']['architecture']).to(device)
-    elif model_type == "BasicUNet":
-        model = BasicUNet(**optuna_config['model']['architecture']).to(device)
+    model = getattr(monai.networks.nets, model_type)(**optuna_config['model']['architecture']).to(device)
 
     ## EVALUATION METRIC ##
-    
     if metric_type == "FocalLoss":
         loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
     else:
