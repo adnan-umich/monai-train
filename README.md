@@ -223,11 +223,16 @@ optuna:
   hyperparam:
     learning_rate: [0.00001, 0.0001] # min, max
     batch: [1, 5] # min, max
-    epoch: [300, 500] # min, max
+    epoch: [10, 11] # min, max
+    beta_1: [0.85, 0.999] # min, max
+    beta_2: [0.85, 0.999] # min, max
+    weight_decay: [0, 0.000001] # min, max
+    optimizer: ["Adam", "AdamW"]
+    loss: ["DiceLoss", "DiceCELoss", "MaskedDiceLoss", "GeneralizedDiceLoss", "FocalLoss", "TverskyLoss"]
   settings:
-    trials: 100
+    trials: 500
     sampling: "TPESampler" # Ref: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
-    split: 0.8 # Only used if kfold disabled. Default 0.8.
+    split: 0.8 # Only used if kfold disabled. Default 0.8
 ```
 
 ---

@@ -11,6 +11,8 @@ import argparse
 import time
 import plotly.graph_objects as go
 import sys, importlib
+import monai.losses
+import monai.networks.nets
 import optuna
 from optuna.visualization import plot_optimization_history, plot_parallel_coordinate, plot_slice, plot_param_importances, plot_pareto_front, plot_timeline
 from monai.transforms import (
@@ -35,10 +37,8 @@ from monai.transforms import (
 )
 from monai.utils import first, set_determinism
 from monai.handlers.utils import from_engine
-from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
 from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
-from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
 from monai.config import print_config
@@ -46,6 +46,7 @@ from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
 from abc import ABC, abstractmethod
 from optuna.trial import TrialState
+
 
 class Gen_Figures(object):
         # Record figures
@@ -70,14 +71,12 @@ class Gen_Figures(object):
                 fig = plot_parallel_coordinate(study, target=lambda t: t.values[1], target_name="Average Loss")   
                 fig['layout']['height'] = 400
                 fig['layout']['width'] = 1200
-                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
                 fig.data[0].line.colorscale = 'purpor'
                 aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Training Loss"})
                 
                 fig = plot_parallel_coordinate(study, target=lambda t: t.values[2], target_name="Validation Loss")
                 fig['layout']['height'] = 400
                 fig['layout']['width'] = 1200
-                fig.data[0].line.reversescale = not fig.data[0].line.reversescale
                 fig.data[0].line.colorscale = 'purpor'
                 aim_run.track(aim.Figure(fig), name=f"Plot Parallel Coordinate", context={"metric":"Average Validation Loss"})
 
@@ -101,34 +100,17 @@ def execute():
         print(f'Output directory {output_dir} does not exist. Creating it.')
         os.makedirs(output_dir, exist_ok=True)
     
-    if optuna_config['optuna']['settings']['sampling'] == "TPESampler":
-        sampler = optuna.samplers.TPESampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "BaseSampler":
-        sampler = optuna.samplers.BaseSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "GridSampler":
-        sampler = optuna.samplers.GridSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "RandomSampler":
-        sampler = optuna.samplers.RandomSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "CmaEsSampler":
-        sampler = optuna.samplers.CmaEsSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "PartialFixedSampler":
-        sampler = optuna.samplers.PartialFixedSampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "NSGAIISampler":
-        sampler = optuna.samplers.NSGAIISampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "MOTPESampler":
-        sampler = optuna.samplers.MOTPESampler(seed=seed)
-    elif optuna_config['optuna']['settings']['sampling'] == "IntersectionSearchSpace":
-        sampler = optuna.samplers.IntersectionSearchSpace(seed=seed)
-
+    sampler = getattr(optuna.samplers, optuna_config['optuna']['settings']['sampling'])(seed=seed)
+    
     aim_run["Model"] = optuna_config['model']['type']
     aim_run["Model_architecture"] = optuna_config['model']['architecture']
     aim_run["Optuna_settings"] = optuna_config['optuna'] 
-
+    
     study = optuna.create_study(study_name="Monai-Optuna MLOps",sampler=sampler,directions=['maximize','minimize','minimize'])
     gen_figures = Gen_Figures(aim_run)
     study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
-
+    
     print("Study statistics: ")
     print("  Number of finished trials: ", len(study.trials))
     print("  Number of complete trials: ", len(complete_trials))
@@ -169,9 +151,12 @@ def nokfold_objective_training(trial):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_epochs = trial.suggest_int('epochs', optuna_config['optuna']['hyperparam']['epoch'][0], optuna_config['optuna']['hyperparam']['epoch'][1])
     lr = trial.suggest_float("lr", optuna_config['optuna']['hyperparam']['learning_rate'][0], optuna_config['optuna']['hyperparam']['learning_rate'][1], log=True)
+    b1 = trial.suggest_float("beta_1", optuna_config['optuna']['hyperparam']['beta_1'][0], optuna_config['optuna']['hyperparam']['beta_1'][1], log=False)
+    b2 = trial.suggest_float("beta_2", optuna_config['optuna']['hyperparam']['beta_2'][0], optuna_config['optuna']['hyperparam']['beta_2'][1], log=False)
+    weight_decay = trial.suggest_float("weight_decay", optuna_config['optuna']['hyperparam']['weight_decay'][0], optuna_config['optuna']['hyperparam']['weight_decay'][1], log=False)
     batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=True)
-    optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
-    loss_type = trial.suggest_categorical("loss_func", ["DiceLoss", "DiceCELoss"])
+    optimizer_type = trial.suggest_categorical("optimizer", optuna_config['optuna']['hyperparam']['optimizer'])
+    loss_type = trial.suggest_categorical("loss_func", optuna_config['optuna']['hyperparam']['loss'])
     ## Load Data
     try:
         # Check if data_dir exists
@@ -222,26 +207,19 @@ def nokfold_objective_training(trial):
     metric_type = loss_type
 
     ## MODEL ##
-    if model_type == "UNet":
-        model = UNet(**optuna_config['model']['architecture']).to(device)
-    elif model_type == "UNetr":
-        model = UNETR(**optuna_config['model']['architecture']).to(device)
-    elif model_type == "BasicUNet":
-        model = BasicUNet(**optuna_config['model']['architecture']).to(device)
+    model = getattr(monai.networks.nets, model_type)(**optuna_config['model']['architecture']).to(device)
 
     ## EVALUATION METRIC ##
-    if metric_type == "DiceLoss":
-        loss_function = DiceLoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
-    elif metric_type == "DiceCELoss":
-        loss_function = DiceCELoss(to_onehot_y=True, softmax=True)
-        dice_metric = DiceMetric(include_background=True, reduction="mean")
+    if metric_type == "FocalLoss":
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+    else:
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
+    
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
+
 
     ## OPTIMIZATION ##
-    if optimizer_type == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr)
-    elif optimizer_type == "AdamW":
-        optimizer = torch.optim.AdamW(model.parameters(), lr, weight_decay=1e-5)
+    optimizer = getattr(torch.optim, optimizer_type)(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
 
     Optimizer_metadata = {}
     for ind, param_group in enumerate(optimizer.param_groups):
