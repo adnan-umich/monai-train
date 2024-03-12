@@ -234,6 +234,17 @@ optuna:
     sampling: "TPESampler" # Ref: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
     split: 0.8 # Only used if kfold disabled. Default 0.8
 ```
+### Hyperparameters
+```
+-- learning_rate: [min, max]
+-- batch: [min, max]
+-- epoch: [min, max]
+-- beta_1: [min, max] coefficient used with beta_2 for computing running averages of gradient and its square. Pytorch defaults (0.9, 0.999)
+-- beta_2: [min, max] coefficient used with beta_1 for computing running averages of gradient and its square. Pytorch defaults (0.9, 0.999)
+-- weight_decay: [min, max] weight decay rate (L2 penalty). Pytorch defaults (0)
+-- optimizer: Optimizer function to use. MONAI uses the Pytorch provided optimizer functions. (https://pytorch.org/docs/stable/generated/torch.optim.Adam.html, https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html)
+-- loss: MONAI loss function to use (https://docs.monai.io/en/0.2.0/losses.html)
+```
 
 ---
 
