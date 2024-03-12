@@ -46,6 +46,7 @@ from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
 from abc import ABC, abstractmethod
 from optuna.trial import TrialState
+from functools import partial
 
 
 class Gen_Figures(object):
@@ -108,7 +109,10 @@ def execute():
     
     study = optuna.create_study(study_name="Monai-Optuna MLOps",sampler=sampler,directions=['maximize','minimize','minimize'])
     gen_figures = Gen_Figures(aim_run)
-    study.optimize(nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures])
+    # implement partial objective function to inject aim_run object prior to optimization
+    partial_nokfold_objective_training = partial(nokfold_objective_training, aim_run=aim_run)
+
+    study.optimize(partial_nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
     
     print("Study statistics: ")
@@ -145,7 +149,7 @@ def execute():
     aim_run.close()
     return None
 
-def nokfold_objective_training(trial):
+def nokfold_objective_training(trial, aim_run):
     optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
     slice_to_track = optuna_config['model']['slice_to_track']
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -293,6 +297,21 @@ def nokfold_objective_training(trial):
 
                     # tracking input, label and output images with Aim
                     output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+                    aim_run.track(
+                            aim.Image(val_inputs[0, 0, :, :, slice_to_track], caption=f"Input Image: {index}"),
+                            name="validation",
+                            context={"type": "input", 'trial': trial.number},
+                        )
+                    aim_run.track(
+                            aim.Image(val_labels[0, 0, :, :, slice_to_track], caption=f"Label Image: {index}"),
+                            name="validation",
+                            context={"type": "label", 'trial': trial.number},
+                        )
+                    aim_run.track(
+                            aim.Image(output, caption=f"Predicted Label: {index}"),
+                            name="predictions",
+                            context={"type": "labels", 'trial': trial.number},
+                        )
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
                     val_labels = [post_label(i) for i in decollate_batch(val_labels)]
                     # compute metric for current iteration
