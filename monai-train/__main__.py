@@ -37,7 +37,7 @@ from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
 from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
-from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
+from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
 from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
@@ -163,11 +163,11 @@ def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch
 
     # Create training dataloader
     train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=workers)
+    train_loader = ThreadDataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
 
     # Create validation dataloader
     val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=cache_rate, num_workers=workers)
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers)
+    val_loader = ThreadDataLoader(val_ds, batch_size=1, num_workers=0)
 
     return [train_loader, val_loader, train_ds, val_ds]
 
@@ -595,8 +595,8 @@ def kfold_training():
     train_dss = [cvdataset.get_dataset(folds=folds[0:i] + folds[(i + 1) :]) for i in folds]
     val_dss = [cvdataset.get_dataset(folds=i, transform=val_transforms) for i in range(kfold)]
 
-    train_loaders = [DataLoader(train_dss[i], batch_size=batch_size, shuffle=True, num_workers=4) for i in folds]
-    val_loaders = [DataLoader(val_dss[i], batch_size=1, num_workers=4) for i in folds]
+    train_loaders = [ThreadDataLoader(train_dss[i], batch_size=batch_size, shuffle=True, num_workers=0) for i in folds]
+    val_loaders = [ThreadDataLoader(val_dss[i], batch_size=1, num_workers=0) for i in folds]
 
     # log max epochs
     aim_run["max_epochs"] = max_epochs
