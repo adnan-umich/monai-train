@@ -40,7 +40,7 @@ from monai.handlers.utils import from_engine
 from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
 from monai.inferers import sliding_window_inference
-from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch
+from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
 from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
@@ -199,12 +199,12 @@ def nokfold_objective_training(trial, aim_run):
     train_transforms, val_transforms = mtrain.transformer.mtrain_transforms(optuna_config['model']['image_size'], roi_size=optuna_config['model']['validation_roi'])
 
     # Create training dataloader
-    train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=1.0, num_workers=4)
-    train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=4)
+    train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=1.0, num_workers=8)
+    train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
 
     # Create validation dataloader
-    val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=1.0, num_workers=4)
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=4)
+    val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=1.0, num_workers=8)
+    val_loader = DataLoader(val_ds, batch_size=1, num_workers=0)
 
     ## Generate model, loss function, optimizers    
     model_type = optuna_config['model']['type']
