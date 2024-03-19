@@ -200,11 +200,11 @@ def nokfold_objective_training(trial, aim_run):
 
     # Create training dataloader
     train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=1.0, num_workers=8)
-    train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
+    train_loader = ThreadDataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
 
     # Create validation dataloader
     val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=1.0, num_workers=8)
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=0)
+    val_loader = ThreadDataLoader(val_ds, batch_size=1, num_workers=0)
 
     ## Generate model, loss function, optimizers    
     model_type = optuna_config['model']['type']
