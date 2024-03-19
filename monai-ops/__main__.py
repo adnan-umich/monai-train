@@ -158,7 +158,7 @@ def nokfold_objective_training(trial, aim_run):
     b1 = trial.suggest_float("beta_1", optuna_config['optuna']['hyperparam']['beta_1'][0], optuna_config['optuna']['hyperparam']['beta_1'][1], log=False)
     b2 = trial.suggest_float("beta_2", optuna_config['optuna']['hyperparam']['beta_2'][0], optuna_config['optuna']['hyperparam']['beta_2'][1], log=False)
     weight_decay = trial.suggest_float("weight_decay", optuna_config['optuna']['hyperparam']['weight_decay'][0], optuna_config['optuna']['hyperparam']['weight_decay'][1], log=False)
-    batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=True)
+    batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=False)
     optimizer_type = trial.suggest_categorical("optimizer", optuna_config['optuna']['hyperparam']['optimizer'])
     loss_type = trial.suggest_categorical("loss_func", optuna_config['optuna']['hyperparam']['loss'])
     ## Load Data
