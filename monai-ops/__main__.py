@@ -112,7 +112,7 @@ def execute():
     # implement partial objective function to inject aim_run object prior to optimization
     partial_nokfold_objective_training = partial(nokfold_objective_training, aim_run=aim_run)
 
-    study.optimize(partial_nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures])
+    study.optimize(partial_nokfold_objective_training, n_trials=optuna_config['optuna']['settings']['trials'], callbacks=[gen_figures], show_progress_bar=True)
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
     
     print("Study statistics: ")
