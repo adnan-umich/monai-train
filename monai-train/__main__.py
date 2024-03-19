@@ -33,11 +33,10 @@ from monai.transforms import (
 )
 from monai.handlers.utils import from_engine
 from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
-from monai.networks.layers import Norm
 from monai.metrics import DiceMetric
 from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
-from monai.data import CacheDataset, DataLoader, Dataset, decollate_batch, ThreadDataLoader
+from monai.data import CacheDataset, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
 from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
@@ -664,11 +663,11 @@ def kfold_training():
                     batch_data["image"].to(device),
                     batch_data["label"].to(device),
                 )
-                optimizer.zero_grad()
-                outputs = model(inputs)
+                #optimizer.zero_grad()
+                outputs = sliding_window_inference(inputs=inputs, roi_size=roi_size, sw_batch_size=4, predictor=model)
                 _loss = loss_function(outputs, labels)
                 _loss.backward()
-                optimizer.step()
+                #optimizer.step()
                 val_loss += _loss.item()
                 print(f"{step}/{len(val_dss[fold]) // val_loaders[fold].batch_size}, " f"validation_loss: {_loss.item():.4f}")
                 # track batch loss metric
