@@ -106,6 +106,10 @@ def execute():
     aim_run["Model"] = optuna_config['model']['type']
     aim_run["Model_architecture"] = optuna_config['model']['architecture']
     aim_run["Optuna_settings"] = optuna_config['optuna'] 
+
+    print("\nThis version of Monai-Ops uses the Pytorch Mixed-Precision acceleration. A side-effect \n \
+           of this acceleration is certain combination of hyperparameters can make trials fail \n"
+    )
     
     study = optuna.create_study(study_name="Monai-Optuna MLOps",sampler=sampler,directions=['maximize','minimize','minimize'])
     gen_figures = Gen_Figures(aim_run)
@@ -241,6 +245,8 @@ def nokfold_objective_training(trial, aim_run):
     metric_values = []
     post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
     post_label = Compose([AsDiscrete(to_onehot=2)])
+    scaler = torch.cuda.amp.GradScaler()
+    _scaler = torch.cuda.amp.GradScaler()
 
     for epoch in range(n_epochs):
         model.train()
@@ -254,10 +260,15 @@ def nokfold_objective_training(trial, aim_run):
                 batch_data["label"].to(device),
             )
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = loss_function(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            with torch.cuda.amp.autocast():
+                outputs = model(inputs)
+                loss = loss_function(outputs, labels)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            #loss.backward()
+            #optimizer.step()
             epoch_loss += loss.item()
 
         epoch_loss /= step
@@ -273,11 +284,13 @@ def nokfold_objective_training(trial, aim_run):
                 batch_data["label"].to(device),
             )
             #optimizer.zero_grad()
-            outputs = sliding_window_inference(inputs=inputs, roi_size=optuna_config['model']['validation_roi'], sw_batch_size=4, predictor=model)
-            #outputs = model(inputs)
-            _loss = loss_function(outputs, labels)
-            _loss.backward()
-            #optimizer.step()
+            with torch.cuda.amp.autocast():
+                outputs = sliding_window_inference(inputs=inputs, roi_size=optuna_config['model']['validation_roi'], sw_batch_size=4, predictor=model)
+                #outputs = model(inputs)
+                _loss = loss_function(outputs, labels)
+            
+            _scaler.scale(_loss).backward()
+            #_loss.backward()
             val_loss += _loss.item()
 
         val_loss /= step
@@ -293,10 +306,12 @@ def nokfold_objective_training(trial, aim_run):
                         val_data["label"].to(device),
                     )
                     sw_batch_size = 4
-                    val_outputs = sliding_window_inference(val_inputs, optuna_config['model']['validation_roi'], sw_batch_size, model)
+                    with torch.cuda.amp.autocast():
+                        val_outputs = sliding_window_inference(val_inputs, optuna_config['model']['validation_roi'], sw_batch_size, model)
 
-                    # tracking input, label and output images with Aim
-                    output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+                        # tracking input, label and output images with Aim
+                        output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+     
                     aim_run.track(
                             aim.Image(val_inputs[0, 0, :, :, slice_to_track], caption=f"Input Image: {index}"),
                             name="validation",
