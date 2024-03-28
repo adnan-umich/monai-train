@@ -88,6 +88,58 @@ class Gen_Figures(object):
                 fig = optuna.visualization.plot_pareto_front(study)
                 fig['layout']['height'] = 800
                 fig['layout']['width'] = 1200
+                
+                # Define sliders for adjusting the maximum value of x, y, and z axes
+                sliders = [
+                    {'steps': [
+                        {'method': 'relayout', 'args': ['scene.xaxis.range[1]', 0.2], 'label': 'x-axis (0.2)'},
+                        {'method': 'relayout', 'args': ['scene.xaxis.range[1]', 0.5], 'label': 'x-axis (0.5)'},
+                        {'method': 'relayout', 'args': ['scene.xaxis.range[1]', 1.0], 'label': 'x-axis (1.0)'},
+                        {'method': 'relayout', 'args': ['scene.xaxis.range[1]', 1.5], 'label': 'x-axis (1.5)'},
+                    ],
+                    'active': 0,
+                    'y': 0,
+                    'x': -0.1,
+                    'len': 0.3,
+                    'pad': {'t': 50, 'b': 10},
+                    'currentvalue': {'visible': True, 'prefix': 'Max Value: '},
+                    'transition': {'duration': 300, 'easing': 'cubic-in-out'}
+                    },
+
+                    {'steps': [
+                        {'method': 'relayout', 'args': ['scene.yaxis.range[1]', 0.2], 'label': 'y-axis (0.2)'},
+                        {'method': 'relayout', 'args': ['scene.yaxis.range[1]', 0.5], 'label': 'y-axis (0.5)'},
+                        {'method': 'relayout', 'args': ['scene.yaxis.range[1]', 1.0], 'label': 'y-axis (1.0)'},
+                        {'method': 'relayout', 'args': ['scene.yaxis.range[1]', 1.5], 'label': 'y-axis (1.5)'},
+                    ],
+                    'active': 0,
+                    'y': 0,
+                    'x': 0.3,
+                    'len': 0.3,
+                    'pad': {'t': 50, 'b': 20},
+                    'currentvalue': {'visible': True, 'prefix': 'Max Value: '},
+                    'transition': {'duration': 300, 'easing': 'cubic-in-out'}
+                    },
+
+                    {'steps': [
+                        {'method': 'relayout', 'args': ['scene.zaxis.range[1]', 0.2], 'label': 'z-axis (0.2)'},
+                        {'method': 'relayout', 'args': ['scene.zaxis.range[1]', 0.5], 'label': 'z-axis (0.5)'},
+                        {'method': 'relayout', 'args': ['scene.zaxis.range[1]', 1.0], 'label': 'z-axis (1.0)'},
+                        {'method': 'relayout', 'args': ['scene.zaxis.range[1]', 1.5], 'label': 'z-axis (1.5)'},
+                    ],
+                    'active': 0,
+                    'y': 0,
+                    'x': 0.7,
+                    'len': 0.3,
+                    'pad': {'t': 50, 'b': 20},
+                    'currentvalue': {'visible': True, 'prefix': 'Max Value: '},
+                    'transition': {'duration': 300, 'easing': 'cubic-in-out'}
+                    }
+                ]
+                # Update layout with sliders
+                fig.update_layout(
+                    sliders=sliders,
+                )
                 aim_run.track(aim.Figure(fig), name=f"Pareto Front")
             except:
                 return None
