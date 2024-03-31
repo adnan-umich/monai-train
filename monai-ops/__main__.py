@@ -145,13 +145,18 @@ class Gen_Figures(object):
                 return None
 
 def execute():
-    optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
+    optuna_config, data_dir, output_dir, seed, save_best_model = parse_args(create_parser())
     set_determinism(seed=seed)
     aim_run = aim.Run(experiment='Monai-Optuna MLOps')
-
     if not os.path.exists(output_dir):
         print(f'Output directory {output_dir} does not exist. Creating it.')
         os.makedirs(output_dir, exist_ok=True)
+
+    # End to end pipeline process
+    if save_best_model is not None and save_best_model in ["dice", "training", "validation", "all"]:
+        _saving_model = True
+    else:
+        _saving_model = False
     
     sampler = getattr(optuna.samplers, optuna_config['optuna']['settings']['sampling'])(seed=seed)
     
@@ -198,11 +203,250 @@ def execute():
     print(f"\tparams: {trial_with_lowest_validation_loss.params}")
     print(f"\tvalues (mean dice, average training loss, average validation loss): {trial_with_lowest_validation_loss.values}")
 
+    best_trials = {"dice": trial_with_highest_dice.params,
+                   "training": trial_with_lowest_training_loss.params,
+                   "validation": trial_with_lowest_validation_loss.params
+    }
+
+    # Now that the experiment has completed, execute the model saving pipeline. 
+    """
+    params: {'epochs': 365, 'lr': 1.7918085415441013e-05, 'beta_1': 0.9194803051555897, 'beta_2': 0.8864194132082388, 
+    'weight_decay': 1.589695836455197e-07, 'batch': 1, 'optimizer': 'Adam', 'loss_func': 'FocalLoss'}
+    """
+    if _saving_model == True:
+        if save_best_model == "all":
+            for x in ["dice", "training", "validation"]:
+                saving_best_trial(id = aim_run.name,
+                    sbm = x,
+                    epochs = best_trials[x]['epochs'],
+                    learning_rate = best_trials[x]['lr'],
+                    batch = best_trials[x]['batch'],
+                    optimizer = best_trials[x]['optimizer'],
+                    beta_1 = best_trials[x]['beta_1'],
+                    beta_2 = best_trials[x]['beta_2'],
+                    weight_decay = best_trials[x]['weight_decay'],
+                    loss_func = best_trials[x]['loss_func']
+                )
+        else:
+            saving_best_trial(id = aim_run.name,
+                sbm = save_best_model,
+                epochs = best_trials[save_best_model]['epochs'],
+                learning_rate = best_trials[save_best_model]['lr'],
+                batch = best_trials[save_best_model]['batch'],
+                optimizer = best_trials[save_best_model]['optimizer'],
+                beta_1 = best_trials[save_best_model]['beta_1'],
+                beta_2 = best_trials[save_best_model]['beta_2'],
+                weight_decay = best_trials[save_best_model]['weight_decay'],
+                loss_func = best_trials[save_best_model]['loss_func']
+            )
+             
     aim_run.close()
     return None
 
+def saving_best_trial(id, sbm, epochs, learning_rate, batch, optimizer, beta_1, beta_2, weight_decay, loss_func):
+    optuna_config, data_dir, output_dir, seed, save_best_model = parse_args(create_parser())
+    slice_to_track = optuna_config['model']['slice_to_track']
+    accel = optuna_config['optuna']['settings']['accelerate']
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_determinism(seed=seed)
+
+    ## Load hyper params
+    n_epochs = epochs
+    lr = learning_rate
+    b1 = beta_1
+    b2 = beta_2
+    weight_decay = weight_decay
+    batch = batch
+    optimizer_type = optimizer
+    loss_type = loss_func
+    ## Load data
+    try:
+        # Check if data_dir exists
+        if not os.path.isdir(data_dir):
+            raise Exception(f"The directory '{data_dir}' does not exist.")            
+
+        # Check for the presence of required folders
+        required_folders = ["imagesTr", "labelsTr", "imagesTs"]
+        for folder in required_folders:
+            if not os.path.isdir(os.path.join(data_dir, folder)):
+                raise Exception(f"The directory '{folder}' does not exist in '{data_dir}'.")
+
+        # Check if each image in imagesTr has a corresponding label in labelsTr
+        imagesTr_files = os.listdir(os.path.join(data_dir, "imagesTr"))
+        labelsTr_files = os.listdir(os.path.join(data_dir, "labelsTr"))
+        for image_file in imagesTr_files:
+            if image_file not in labelsTr_files:
+                raise Exception(f"No matching label found for the image '{image_file}' in 'labelsTr' folder.")
+
+        print("All conditions met.")
+    except Exception as e:
+        print("Error:", e)
+
+    # Get list of training images, and their labels
+    train_images = sorted(glob.glob(os.path.join(data_dir, "imagesTr", "*.nii.gz")))
+    train_labels = sorted(glob.glob(os.path.join(data_dir, "labelsTr", "*.nii.gz")))
+    data_dicts = [{"image": image_name, "label": label_name} for image_name, label_name in zip(train_images, train_labels)]
+
+    # Split training data into training and validation
+    split = optuna_config['optuna']['settings']['split']
+    train_size = int(split * len(data_dicts))
+    val_size = len(data_dicts) - train_size
+    train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
+
+    # get transformations
+    train_transforms, val_transforms = mtrain.transformer.mtrain_transforms(optuna_config['model']['image_size'], roi_size=optuna_config['model']['validation_roi'])
+
+    # Create training dataloader
+    train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=1.0, num_workers=8)
+    train_loader = ThreadDataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
+
+    # Create validation dataloader
+    val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=1.0, num_workers=8)
+    val_loader = ThreadDataLoader(val_ds, batch_size=1, num_workers=0)
+
+    ## Generate model, loss function, optimizers    
+    model_type = optuna_config['model']['type']
+    metric_type = loss_type
+
+    ## MODEL ##
+    model = getattr(monai.networks.nets, model_type)(**optuna_config['model']['architecture']).to(device)
+
+    ## EVALUATION METRIC ##
+    if metric_type == "FocalLoss":
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+    else:
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
+    
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
+
+    ## OPTIMIZATION ##
+    optimizer = getattr(torch.optim, optimizer_type)(model.parameters(), lr, betas=(b1, b2), weight_decay=weight_decay)
+
+    Optimizer_metadata = {}
+    for ind, param_group in enumerate(optimizer.param_groups):
+        optim_meta_keys = list(param_group.keys())
+        Optimizer_metadata[f"param_group_{ind}"] = {
+            key: value for (key, value) in param_group.items() if "params" not in key
+        }
+
+     #### TRAINING STEPS BELOW ####
+    val_interval = 2
+    best_metric = -1
+    best_metric_epoch = -1
+    epoch_loss_values = []
+    val_loss_values = []
+    metric_values = []
+    post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
+    post_label = Compose([AsDiscrete(to_onehot=2)])
+    if accel == True:
+        scaler = torch.cuda.amp.GradScaler()
+        _scaler = torch.cuda.amp.GradScaler()
+        print("\nThis instance of Monai-Ops is using the Pytorch Mixed-Precision acceleration. A side-effect \n \
+           of this acceleration could be certain combination of hyperparameters can make trials fail. \n"
+        )
+
+    for epoch in range(n_epochs):
+        model.train()
+        epoch_loss = 0
+        val_loss = 0
+        step = 0
+        for batch_data in train_loader:
+            step += 1
+            inputs, labels = (
+                batch_data["image"].to(device),
+                batch_data["label"].to(device),
+            )
+            optimizer.zero_grad()
+            
+            if accel == True:
+                with torch.cuda.amp.autocast():
+                    outputs = model(inputs)
+                    loss = loss_function(outputs, labels)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                outputs = model(inputs)
+                loss = loss_function(outputs, labels)
+                loss.backward()
+                optimizer.step()
+
+            epoch_loss += loss.item()
+
+        epoch_loss /= step
+        epoch_loss_values.append(epoch_loss)
+
+        #### val loss start
+        step = 0
+        model.eval()
+        for batch_data in val_loader:
+            step += 1
+            inputs, labels = (
+                batch_data["image"].to(device),
+                batch_data["label"].to(device),
+            )
+            #optimizer.zero_grad()
+            if accel == True:
+                with torch.cuda.amp.autocast():
+                    outputs = sliding_window_inference(inputs=inputs, roi_size=optuna_config['model']['validation_roi'], sw_batch_size=4, predictor=model)
+                    _loss = loss_function(outputs, labels)
+                _scaler.scale(_loss).backward()
+            else:
+                outputs = sliding_window_inference(inputs=inputs, roi_size=optuna_config['model']['validation_roi'], sw_batch_size=4, predictor=model)
+                #outputs = model(inputs)
+                _loss = loss_function(outputs, labels)
+                _loss.backward()
+                #optimizer.step()
+
+            val_loss += _loss.item()
+
+        val_loss /= step
+        val_loss_values.append(val_loss)
+        #### val loss end
+
+        if (epoch + 1) % val_interval == 0:
+            model.eval()
+            with torch.no_grad():
+                for index, val_data in enumerate(val_loader):
+                    val_inputs, val_labels = (
+                        val_data["image"].to(device),
+                        val_data["label"].to(device),
+                    )
+                    sw_batch_size = 4
+                    if accel == True:
+                        with torch.cuda.amp.autocast():
+                            val_outputs = sliding_window_inference(val_inputs, optuna_config['model']['validation_roi'], sw_batch_size, model)
+                            output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+                    else:
+                        val_outputs = sliding_window_inference(val_inputs, optuna_config['model']['validation_roi'], sw_batch_size, model)
+                        # tracking input, label and output images with Aim
+                        output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+                    val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    val_labels = [post_label(i) for i in decollate_batch(val_labels)]
+                    # compute metric for current iteration
+                    dice_metric(y_pred=val_outputs, y=val_labels)
+
+                # aggregate the final mean dice result
+                metric = dice_metric.aggregate().item()
+
+                # reset the status for next validation round
+                dice_metric.reset()
+
+                metric_values.append(metric)
+                if metric > best_metric:
+                    best_metric = metric
+                    best_metric_epoch = epoch + 1
+                    torch.save(model.state_dict(), os.path.join(output_dir, f"{id}_{sbm}_model.pth"))
+                    best_model_log_message = f"saved new best metric model at the {epoch+1}th epoch"
+                    print(best_model_log_message)
+
+                message1 = f"current epoch: {epoch + 1} current mean dice: {metric:.4f}"
+                message2 = f"\nbest mean dice: {best_metric:.4f} "
+                message3 = f"at epoch: {best_metric_epoch}"
+                print(message1, message2, message3)
+
 def nokfold_objective_training(trial, aim_run):
-    optuna_config, data_dir, output_dir, seed = parse_args(create_parser())
+    optuna_config, data_dir, output_dir, seed, save_best_model = parse_args(create_parser())
     accel = optuna_config['optuna']['settings']['accelerate']
     slice_to_track = optuna_config['model']['slice_to_track']
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -214,6 +458,7 @@ def nokfold_objective_training(trial, aim_run):
     batch = trial.suggest_int("batch", optuna_config['optuna']['hyperparam']['batch'][0], optuna_config['optuna']['hyperparam']['batch'][1], log=False)
     optimizer_type = trial.suggest_categorical("optimizer", optuna_config['optuna']['hyperparam']['optimizer'])
     loss_type = trial.suggest_categorical("loss_func", optuna_config['optuna']['hyperparam']['loss'])
+    set_determinism(seed=seed)
     ## Load Data
     try:
         # Check if data_dir exists
@@ -442,7 +687,8 @@ def create_parser():
     g.add_argument(
         '--save_best_model',
         dest='save_best_model',
-        type=str)
+        type=str,
+        default=None)
     return parser
 
 def parse_args(parser):
@@ -459,7 +705,11 @@ def parse_args(parser):
         seed = args.seed
     else:
         seed = 0
-    return [optuna_config, data_dir, output_dir, seed]
+    if args.save_best_model is not None:
+        save_best_model = args.save_best_model
+    else:
+        save_best_model = None
+    return [optuna_config, data_dir, output_dir, seed, save_best_model]
 
 
 if __name__ == "__main__":
