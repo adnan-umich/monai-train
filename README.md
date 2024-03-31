@@ -77,6 +77,8 @@
     ├── monai-ops
     │   ├── __init__.py
     │   └── __main__.py
+    ├── inferencer
+    │   └── inference.ipynb
     ├── poetry.lock
     ├── pyproject.toml
     └── requirements.txt
@@ -201,6 +203,10 @@ Use the following command to run monai-train:
                                            --data=/home/adnanzai/mice_data_v2 \
                                            --output /home/adnanzai/optuna \
                                            --seed 0
+                                           (optional) --save_best_model ["dice", "training",
+                                           "validation", "all"]
+                                           save_best_model flag instructs whether to save the pytorch model and training weights
+                                           from the three best trials
 ```
 
 ###  Monai-Ops Configuration
@@ -233,6 +239,7 @@ optuna:
     trials: 500
     sampling: "TPESampler" # Ref: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
     split: 0.8 # Only used if kfold disabled. Default 0.8
+    accelerate: False # True/False to use Pytorch mixed-precision acceleration
 ```
 ### Hyperparameters
 ```
