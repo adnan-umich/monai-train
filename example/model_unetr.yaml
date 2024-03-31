@@ -1,5 +1,5 @@
 model:
-  type: "UNetr"
+  type: "UNETR"
   architecture:
     spatial_dims: 3
     in_channels: 1
@@ -13,6 +13,9 @@ model:
     norm_name: "instance"
     res_block: True
   optimizer: "AdamW"
+  beta_1: 0.999
+  beta_2: 0.999
+  weight_decay: 0.000001
   metric:
     type: "DiceLoss"
     include_background: False

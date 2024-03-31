@@ -10,6 +10,8 @@ import numpy as np
 import argparse
 import time
 import plotly.graph_objects as go
+import monai.networks.nets
+import monai.losses
 from monai.utils import first, set_determinism
 from monai.transforms import (
     AsDiscrete,
@@ -32,9 +34,7 @@ from monai.transforms import (
     RandAffined,
 )
 from monai.handlers.utils import from_engine
-from monai.networks.nets import UNet, UNETR, SwinUNETR, BasicUNet, SegResNet
 from monai.metrics import DiceMetric
-from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
@@ -170,33 +170,25 @@ def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch
 
     return [train_loader, val_loader, train_ds, val_ds]
 
-def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, metric:dict, learning_rate:float):
+def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, metric:dict, learning_rate:float, b1:float, b2:float, weight_decay:float):
     model_type = model_type
     learning_rate = learning_rate
     metric_type = metric['type']
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ## MODEL ##
-    if model_type == "UNet":
-        model = UNet(**architecture).to(device)
-    elif model_type == "UNetr":
-        model = UNETR(**architecture).to(device)
-    elif model_type == "BasicUNet":
-        model = BasicUNet(**architecture).to(device)
+    model = getattr(monai.networks.nets, model_type)(**architecture).to(device)
 
-    ## EVALUATION METRIC ##
-    if metric_type == "DiceLoss":
-        loss_function = DiceLoss(to_onehot_y=True, softmax=metric['softmax'])
-        dice_metric = DiceMetric(include_background=metric['include_background'], reduction=metric['reduction'])
-    elif metric_type == "DiceCELoss":
-        loss_function = DiceCELoss(to_onehot_y=True, softmax=metric['softmax'])
-        dice_metric = DiceMetric(include_background=metric['include_background'], reduction=metric['reduction'])
+     ## EVALUATION METRIC ##
+    if metric_type == "FocalLoss":
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+    else:
+        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
+    
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
 
     ## OPTIMIZATION ##
-    if optimizer_type == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), learning_rate)
-    elif optimizer_type == "AdamW":
-        optimizer = torch.optim.AdamW(model.parameters(), learning_rate, weight_decay=1e-5)
+    optimizer = getattr(torch.optim, optimizer_type)(model.parameters(), learning_rate, betas=(b1, b2), weight_decay=weight_decay)
 
     # log model metadata
     if aim_run is not None:
@@ -226,7 +218,6 @@ def execute():
         print("Not using k-fold training")
         train_no_kfold()
 
-# No change to train_no_kfold() since last major version.   
 def train_no_kfold():
     # initialize a new Aim Run
     try:
@@ -236,6 +227,9 @@ def train_no_kfold():
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
+        beta_1 = config['beta_1']
+        beta_2 = config['beta_2']
+        weight_decay = config['weight_decay']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
         roi_size = config['validation_roi']
@@ -254,6 +248,9 @@ def train_no_kfold():
         print(f"  Transfer Learning: {transfer_learning}")
         print(f"  Split            : {split}")
         print(f"  Learning Rate    : {learning_rate}")
+        print(f"  beta 1           : {beta_1}")
+        print(f"  beta 2           : {beta_2}")
+        print(f"  weight decay     : {weight_decay}")
         print(f"  Max Epochs       : {max_epochs}")
         print(f"  Batch Size       : {batch_size}")
         print(f"  Image Size       : {image_size}")
@@ -275,7 +272,7 @@ def train_no_kfold():
     # Step 1
     train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
     # Step 2
-    model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate)
+    model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
 
     #### TRAINING STEPS BELOW ####
     val_interval = 2
@@ -540,6 +537,9 @@ def kfold_training():
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
+        beta_1 = config['beta_1']
+        beta_2 = config['beta_2']
+        weight_decay = config['weight_decay']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
         roi_size = config['validation_roi']
@@ -556,6 +556,9 @@ def kfold_training():
         print(f"  Data Directory   : {data_dir}")
         print(f"  Output Directory : {output_dir}")
         print(f"  Transfer Learning: {transfer_learning}")
+        print(f"  beta 1           : {beta_1}")
+        print(f"  beta 2           : {beta_2}")
+        print(f"  weight decay     : {weight_decay}")
         print(f"  Split            : {split}")
         print(f"  Learning Rate    : {learning_rate}")
         print(f"  Max Epochs       : {max_epochs}")
@@ -608,7 +611,7 @@ def kfold_training():
     def train(fold):
         print(f"=============== Training for fold {fold} ===============")
          # Step 2
-        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate)
+        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
         val_interval = 2
         best_metric = -1
         best_metric_epoch = -1
@@ -744,6 +747,9 @@ def kfold_training():
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
+        beta_1 = config['beta_1']
+        beta_2 = config['beta_2']
+        weight_decay = config['weight_decay']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
         roi_size = config['validation_roi']
@@ -760,7 +766,7 @@ def kfold_training():
         train_loader, val_loader, train_ds, val_ds = load_data(data_dir, 1.0, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
 
         # Step 2
-        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, architecture, optimizer_dict, metric_dict, learning_rate)
+        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
 
         #### TRAINING STEPS BELOW ####
         best_metric = -1
