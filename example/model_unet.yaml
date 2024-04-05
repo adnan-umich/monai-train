@@ -9,6 +9,9 @@ model:
     num_res_units: 2
     norm: "BATCH"
   optimizer: "Adam"
+  beta_1: 0.999
+  beta_2: 0.999
+  weight_decay: 0.000001
   metric:
     type: "DiceLoss"
     include_background: False
