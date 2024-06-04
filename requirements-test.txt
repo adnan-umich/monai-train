@@ -1,0 +1,7 @@
+aim==3.17.5
+aim-ui==3.17.5
+aimrecords==0.0.7
+aimrocks==0.4.0
+monai-weekly==1.4.dev2404
+optuna==3.5.0
+torch==2.2.0
