@@ -42,6 +42,9 @@ from monai.apps import download_and_extract, CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
 from .transformer import mtrain_transforms, kfold_transforms
 from abc import ABC, abstractmethod
+import matplotlib
+matplotlib.interactive(False)
+
 
 class CVDataset(ABC, CacheDataset):
     """
@@ -511,8 +514,6 @@ def train_no_kfold():
                         ],
                         sliders=sliders
                 )
-                fig.show()
-
 
                 ####################
 
