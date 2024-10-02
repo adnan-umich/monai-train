@@ -47,7 +47,7 @@ from aim.pytorch import track_gradients_dists, track_params_dists
 from abc import ABC, abstractmethod
 from optuna.trial import TrialState
 from functools import partial
-
+import monai_train as mtrain
 
 class Gen_Figures(object):
         # Record figures
@@ -713,8 +713,4 @@ def parse_args(parser):
 
 
 if __name__ == "__main__":
-    # Add the parent directory of monai-train and monai-ops to the Python path
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    monai_train = "monai-train"
-    mtrain = importlib.import_module(monai_train)
     execute()
