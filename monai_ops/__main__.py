@@ -2,15 +2,10 @@ import yaml
 import torch
 import aim
 import matplotlib.pyplot as plt
-import tempfile
-import shutil
 import os
 import glob
-import numpy as np
 import argparse
-import time
 import plotly.graph_objects as go
-import sys, importlib
 import monai.losses
 import monai.networks.nets
 import optuna
@@ -35,20 +30,85 @@ from monai.transforms import (
     Transform,
     RandAffined,
 )
-from monai.utils import first, set_determinism
-from monai.handlers.utils import from_engine
-from monai.networks.layers import Norm
+from monai.utils import set_determinism
 from monai.metrics import DiceMetric
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
-from monai.apps import download_and_extract, CrossValidation
+from monai.apps import CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
-from abc import ABC, abstractmethod
 from optuna.trial import TrialState
 from functools import partial
 import monai_train as mtrain
+from collections import defaultdict
 
+
+class CustomDataset(Dataset):
+    def __init__(self, image_label_pairs):
+        self.image_label_pairs = image_label_pairs
+
+    def __len__(self):
+        return len(self.image_label_pairs)
+
+    def __getitem__(self, idx):
+        sample = self.image_label_pairs[idx]
+        image_path = sample['image']
+        label_path = sample['label']
+        # Load the image and label (modify this if using a specific loader, e.g., nibabel for .nii.gz)
+        image = self.load_image(image_path)
+        label = self.load_image(label_path)
+        return image, label
+
+    def load_image(self, path):
+        # Implement image loading here (e.g., nibabel for .nii.gz files)
+        # For now, this is a placeholder function
+        return path
+    
+class CustomDataloader:
+    def __init__(self, image_label_pairs, split_ratio=0.8, batch_size=1, seed=0):
+        self.image_label_pairs = image_label_pairs
+        self.split_ratio = split_ratio
+        self.batch_size = batch_size
+        self.seed = seed
+
+        # Group images
+        self.grouped_images = self.group_images()
+
+        # Split into training and validation sets
+        self.training_set, self.validation_set = self.split_groups()
+
+        # Create datasets
+        self.train_dataset = CustomDataset(self.training_set)
+        self.val_dataset = CustomDataset(self.validation_set)
+
+    def group_images(self):
+        """Group images by a common identifier (assumed to be part of the file name).
+        Requested by Olivia & Tomer (Umich)"""
+        groups = defaultdict(list)
+
+        for pair in self.image_label_pairs:
+            # Assuming the group identifier is part of the filename after "cropped filtered"
+            group_id = pair['image'].split('_', 3)[0]  # Adjust as needed for your filenames
+            groups[group_id].append(pair)
+        return list(groups.values())
+
+    def split_groups(self):
+        """Split the groups into training and validation sets using torch.utils.data.random_split with a seed."""
+        total_groups = len(self.grouped_images)
+        split_index = int(total_groups * self.split_ratio)
+
+        # Set up a generator for reproducibility
+        generator = torch.Generator().manual_seed(self.seed)
+
+        # Perform random split
+        train_groups, val_groups = torch.utils.data.random_split(self.grouped_images, [split_index, total_groups - split_index], generator=generator)
+
+        # Flatten the groups into individual image-label pairs
+        training_set = [item for group in train_groups for item in group]
+        validation_set = [item for group in val_groups for item in group]
+
+        return training_set, validation_set
+    
 class Gen_Figures(object):
         # Record figures
         def __init__(self, aim_run):
@@ -145,7 +205,7 @@ class Gen_Figures(object):
                 return None
 
 def execute():
-    optuna_config, data_dir, output_dir, seed, save_best_model = parse_args(create_parser())
+    optuna_config, data_dir, output_dir, seed, save_best_model, group_similar = parse_args(create_parser())
     set_determinism(seed=seed)
     aim_run = aim.Run(experiment='Monai-Optuna MLOps')
     if not os.path.exists(output_dir):
@@ -213,7 +273,7 @@ def execute():
     params: {'epochs': 365, 'lr': 1.7918085415441013e-05, 'beta_1': 0.9194803051555897, 'beta_2': 0.8864194132082388, 
     'weight_decay': 1.589695836455197e-07, 'batch': 1, 'optimizer': 'Adam', 'loss_func': 'FocalLoss'}
     """
-    if _saving_model == True:
+    if _saving_model:
         if save_best_model == "all":
             for x in ["dice", "training", "validation"]:
                 saving_best_trial(id = aim_run.name,
@@ -244,7 +304,7 @@ def execute():
     return None
 
 def saving_best_trial(id, sbm, epochs, learning_rate, batch, optimizer, beta_1, beta_2, weight_decay, loss_func):
-    optuna_config, data_dir, output_dir, seed, save_best_model = parse_args(create_parser())
+    optuna_config, data_dir, output_dir, seed, save_best_model, group_similar = parse_args(create_parser())
     slice_to_track = optuna_config['model']['slice_to_track']
     accel = optuna_config['optuna']['settings']['accelerate']
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -287,21 +347,28 @@ def saving_best_trial(id, sbm, epochs, learning_rate, batch, optimizer, beta_1, 
     train_labels = sorted(glob.glob(os.path.join(data_dir, "labelsTr", "*.nii.gz")))
     data_dicts = [{"image": image_name, "label": label_name} for image_name, label_name in zip(train_images, train_labels)]
 
-    # Split training data into training and validation
     split = optuna_config['optuna']['settings']['split']
-    train_size = int(split * len(data_dicts))
-    val_size = len(data_dicts) - train_size
-    train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
+
+    # Split training data into training and validation
+    if group_similar:
+        custom_dataloader = CustomDataloader(data_dicts, split_ratio=split, batch_size=batch, seed=seed)
+        # Flatten the lists (since we grouped them earlier)
+        training_set, validation_set = custom_dataloader.split_groups()
+    else:
+        # Split training data into training and validation
+        train_size = int(split * len(data_dicts))
+        val_size = len(data_dicts) - train_size
+        training_set, validation_set = torch.utils.data.random_split(data_dicts, [train_size, val_size])
 
     # get transformations
     train_transforms, val_transforms = mtrain.transformer.mtrain_transforms(optuna_config['model']['image_size'], roi_size=optuna_config['model']['validation_roi'])
 
     # Create training dataloader
-    train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=1.0, num_workers=8)
+    train_ds = CacheDataset(data=training_set, transform=train_transforms, cache_rate=1.0, num_workers=8)
     train_loader = ThreadDataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
 
     # Create validation dataloader
-    val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=1.0, num_workers=8)
+    val_ds = CacheDataset(data=validation_set, transform=val_transforms, cache_rate=1.0, num_workers=8)
     val_loader = ThreadDataLoader(val_ds, batch_size=1, num_workers=0)
 
     ## Generate model, loss function, optimizers    
@@ -446,7 +513,7 @@ def saving_best_trial(id, sbm, epochs, learning_rate, batch, optimizer, beta_1, 
                 print(message1, message2, message3)
 
 def nokfold_objective_training(trial, aim_run):
-    optuna_config, data_dir, output_dir, seed, save_best_model = parse_args(create_parser())
+    optuna_config, data_dir, output_dir, seed, save_best_model, group_similar = parse_args(create_parser())
     accel = optuna_config['optuna']['settings']['accelerate']
     slice_to_track = optuna_config['model']['slice_to_track']
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -489,19 +556,27 @@ def nokfold_objective_training(trial, aim_run):
 
     # Split training data into training and validation
     split = optuna_config['optuna']['settings']['split']
-    train_size = int(split * len(data_dicts))
-    val_size = len(data_dicts) - train_size
-    train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
+
+
+    if group_similar:
+        custom_dataloader = CustomDataloader(data_dicts, split_ratio=split, batch_size=batch, seed=seed)
+        # Flatten the lists (since we grouped them earlier)
+        training_set, validation_set = custom_dataloader.split_groups()
+    else:
+        # Split training data into training and validation
+        train_size = int(split * len(data_dicts))
+        val_size = len(data_dicts) - train_size
+        training_set, validation_set = torch.utils.data.random_split(data_dicts, [train_size, val_size])
 
     # get transformations
     train_transforms, val_transforms = mtrain.transformer.mtrain_transforms(optuna_config['model']['image_size'], roi_size=optuna_config['model']['validation_roi'])
 
     # Create training dataloader
-    train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=1.0, num_workers=8)
+    train_ds = CacheDataset(data=training_set, transform=train_transforms, cache_rate=1.0, num_workers=8)
     train_loader = ThreadDataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
 
     # Create validation dataloader
-    val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=1.0, num_workers=8)
+    val_ds = CacheDataset(data=validation_set, transform=val_transforms, cache_rate=1.0, num_workers=8)
     val_loader = ThreadDataLoader(val_ds, batch_size=1, num_workers=0)
 
     ## Generate model, loss function, optimizers    
@@ -689,6 +764,14 @@ def create_parser():
         dest='save_best_model',
         type=str,
         default=None)
+    g.add_argument(
+        '--group-similar',
+        dest='group_similar',
+        action="count", help="group together similar images. The training/validation split will not split grouped images. Images are to be grouped by a shared unique ID")
+    g.add_argument(
+        '--show-config',
+        dest='show_config',
+        action="count")
     return parser
 
 def parse_args(parser):
@@ -709,7 +792,11 @@ def parse_args(parser):
         save_best_model = args.save_best_model
     else:
         save_best_model = None
-    return [optuna_config, data_dir, output_dir, seed, save_best_model]
+
+    if args.show_config:
+        print_config()
+        exit()
+    return [optuna_config, data_dir, output_dir, seed, save_best_model, args.group_similar]
 
 
 if __name__ == "__main__":

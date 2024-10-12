@@ -2,46 +2,43 @@ import yaml
 import torch
 import aim
 import matplotlib.pyplot as plt
-import tempfile
-import shutil
 import os
 import glob
 import numpy as np
 import argparse
-import time
 import plotly.graph_objects as go
 import monai.networks.nets
 import monai.losses
-from monai.utils import first, set_determinism
+from monai.utils import set_determinism
 from monai.transforms import (
     AsDiscrete,
-    AsDiscreted,
-    EnsureChannelFirstd,
+    AsDiscreted,  # noqa: F401
+    EnsureChannelFirstd,  # noqa: F401
     Compose,
-    CropForegroundd,
-    LoadImaged,
-    Orientationd,
-    RandCropByPosNegLabeld,
-    SaveImaged,
-    ScaleIntensityRanged,
-    Spacingd,
-    Invertd,
-    ResizeD,
-    LoadImage,
-    Rotate,
-    Randomizable,
-    Transform,
-    RandAffined,
+    CropForegroundd,  # noqa: F401
+    LoadImaged,  # noqa: F401
+    Orientationd,  # noqa: F401
+    RandCropByPosNegLabeld,  # noqa: F401
+    SaveImaged,  # noqa: F401
+    ScaleIntensityRanged,  # noqa: F401
+    Spacingd,  # noqa: F401
+    Invertd,  # noqa: F401
+    ResizeD,  # noqa: F401
+    LoadImage,  # noqa: F401
+    Rotate,  # noqa: F401
+    Randomizable,  # noqa: F401
+    Transform,  # noqa: F401
+    RandAffined,  # noqa: F401
 )
-from monai.handlers.utils import from_engine
 from monai.metrics import DiceMetric
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
-from monai.apps import download_and_extract, CrossValidation
+from monai.apps import CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
-from .transformer import mtrain_transforms, kfold_transforms
+from monai_train.transformer import mtrain_transforms, kfold_transforms
 from abc import ABC, abstractmethod
+from collections import defaultdict
 import matplotlib
 matplotlib.interactive(False)
 
@@ -68,7 +65,74 @@ class CVDataset(ABC, CacheDataset):
     def _split_datalist(self, datalist):
         raise NotImplementedError(f"Subclass {self.__class__.__name__} must implement this method.")
 
-def get_data_dict(data_dir: str) -> list():
+class CustomDataset(Dataset):
+    def __init__(self, image_label_pairs):
+        self.image_label_pairs = image_label_pairs
+
+    def __len__(self):
+        return len(self.image_label_pairs)
+
+    def __getitem__(self, idx):
+        sample = self.image_label_pairs[idx]
+        image_path = sample['image']
+        label_path = sample['label']
+        # Load the image and label (modify this if using a specific loader, e.g., nibabel for .nii.gz)
+        image = self.load_image(image_path)
+        label = self.load_image(label_path)
+        return image, label
+
+    def load_image(self, path):
+        # Implement image loading here (e.g., nibabel for .nii.gz files)
+        # For now, this is a placeholder function
+        return path
+    
+class CustomDataloader:
+    def __init__(self, image_label_pairs, split_ratio=0.8, batch_size=1, seed=0):
+        self.image_label_pairs = image_label_pairs
+        self.split_ratio = split_ratio
+        self.batch_size = batch_size
+        self.seed = seed
+
+        # Group images
+        self.grouped_images = self.group_images()
+
+        # Split into training and validation sets
+        self.training_set, self.validation_set = self.split_groups()
+
+        # Create datasets
+        self.train_dataset = CustomDataset(self.training_set)
+        self.val_dataset = CustomDataset(self.validation_set)
+
+    def group_images(self):
+        """Group images by a common identifier (assumed to be part of the file name).
+        Requested by Olivia & Tomer (Umich)"""
+        groups = defaultdict(list)
+
+        for pair in self.image_label_pairs:
+            # Assuming the group identifier is part of the filename after "cropped filtered"
+            group_id = pair['image'].split('_', 3)[0]  # Adjust as needed for your filenames
+            groups[group_id].append(pair)
+        return list(groups.values())
+
+    def split_groups(self):
+        """Split the groups into training and validation sets using torch.utils.data.random_split with a seed."""
+        total_groups = len(self.grouped_images)
+        split_index = int(total_groups * self.split_ratio)
+
+        # Set up a generator for reproducibility
+        generator = torch.Generator().manual_seed(self.seed)
+
+        # Perform random split
+        train_groups, val_groups = torch.utils.data.random_split(self.grouped_images, [split_index, total_groups - split_index], generator=generator)
+
+        # Flatten the groups into individual image-label pairs
+        training_set = [item for group in train_groups for item in group]
+        validation_set = [item for group in val_groups for item in group]
+
+        return training_set, validation_set
+
+
+def get_data_dict(data_dir: str) -> list(): # type: ignore
     """
     Return data list for kfold preparation
 
@@ -107,8 +171,8 @@ def get_data_dict(data_dir: str) -> list():
     data_dicts = [{"image": image_name, "label": label_name} for image_name, label_name in zip(train_images, train_labels)]
 
     return data_dicts
-
-def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple, roi_size:tuple) -> list():
+    
+def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch_size:int, image_size:tuple, roi_size:tuple, seed:int, group_similar:bool) -> list(): # type: ignore
     """
     Load data for training and validation.
 
@@ -150,25 +214,41 @@ def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch
     except Exception as e:
         print("Error:", e)
 
-    # Get list of training images, and their labels
+    # Get list of all training images, and their labels
     train_images = sorted(glob.glob(os.path.join(data_dir, "imagesTr", "*.nii.gz")))
     train_labels = sorted(glob.glob(os.path.join(data_dir, "labelsTr", "*.nii.gz")))
     data_dicts = [{"image": image_name, "label": label_name} for image_name, label_name in zip(train_images, train_labels)]
 
-    # Split training data into training and validation
-    train_size = int(split * len(data_dicts))
-    val_size = len(data_dicts) - train_size
-    train_files, val_files = torch.utils.data.random_split(data_dicts, [train_size, val_size])
+    if group_similar:
+        custom_dataloader = CustomDataloader(data_dicts, split_ratio=split, batch_size=batch_size, seed=seed)
+        # Flatten the lists (since we grouped them earlier)
+        training_set, validation_set = custom_dataloader.split_groups()
+    else:
+        # Split training data into training and validation
+        train_size = int(split * len(data_dicts))
+        val_size = len(data_dicts) - train_size
+        training_set, validation_set = torch.utils.data.random_split(data_dicts, [train_size, val_size])
+
+    """
+    print("***********", end="\n\n")
+    for x in training_set:
+        print(x)
+    print("***********", end="\n\n")
+    for x in validation_set:
+        print(x)
+    import sys
+    sys.exit(0)
+    """
 
     # get transformations
     train_transforms, val_transforms = mtrain_transforms(image_size, roi_size=roi_size)
 
     # Create training dataloader
-    train_ds = CacheDataset(data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
+    train_ds = CacheDataset(data=training_set, transform=train_transforms, cache_rate=cache_rate, num_workers=workers)
     train_loader = ThreadDataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
 
     # Create validation dataloader
-    val_ds = CacheDataset(data=val_files, transform=val_transforms, cache_rate=cache_rate, num_workers=workers)
+    val_ds = CacheDataset(data=validation_set, transform=val_transforms, cache_rate=cache_rate, num_workers=workers)
     val_loader = ThreadDataLoader(val_ds, batch_size=1, num_workers=0)
 
     return [train_loader, val_loader, train_ds, val_ds]
@@ -214,11 +294,17 @@ def execute():
     """
 
     kfold = parse_args(create_parser())[-1]
+    group_similar = parse_args(create_parser())[-2]
+
     if kfold is not None and kfold > 0:
         print(f"A {kfold}-fold based training will start.")
         kfold_training()
     else:
-        print("Not using k-fold training")
+        print("Disabled k-fold training")
+        if group_similar:
+            print("Enabled group-similar")
+        else:
+            print("Disabled group-similar")
         train_no_kfold()
 
 def train_no_kfold():
@@ -226,7 +312,7 @@ def train_no_kfold():
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -257,8 +343,10 @@ def train_no_kfold():
         print(f"  Max Epochs       : {max_epochs}")
         print(f"  Batch Size       : {batch_size}")
         print(f"  Image Size       : {image_size}")
-        print(f"  No k-fold cross-valdiation")
+        print("  No k-fold cross-valdiation")
         print(f"  Seed             : {seed}")
+        if group_similar:
+             print("Grouping similar images (on linear-transformations)")
         print("=============================\n")
     except:
         print("Training configuration failed to load. Exiting.")
@@ -273,7 +361,7 @@ def train_no_kfold():
         os.makedirs(output_dir, exist_ok=True)
 
     # Step 1
-    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
+    train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size, seed=seed, group_similar=group_similar)
     # Step 2
     model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
 
@@ -534,7 +622,7 @@ def kfold_training():
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, _, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -567,7 +655,6 @@ def kfold_training():
         print(f"  Image Size       : {image_size}")
         print(f"  {kfold}-fold cross-valdiation")
         print(f"  Seed             : {seed}")
-        print("=============================\n")
     except:
         print("Training configuration failed to load. Exiting.")
 
@@ -609,7 +696,7 @@ def kfold_training():
     aim_run["kfold"] = kfold
 
     #### TRAINING STEPS BELOW ####
-    def train(fold):
+    def train(fold, slice_to_track):
         print(f"=============== Training for fold {fold} ===============")
          # Step 2
         model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
@@ -622,7 +709,6 @@ def kfold_training():
         post_pred = Compose([AsDiscrete(argmax=True, to_onehot=2)])
         post_label = Compose([AsDiscrete(to_onehot=2)])
         
-        slice_to_track = 40
 
         ### Transfer Learning ###
         if transfer_learning is not None:
@@ -631,7 +717,7 @@ def kfold_training():
         
         for epoch in range(max_epochs):
             print("-" * 10)
-            print(f"epoch {epoch + 1}/{max_epochs} of fold {fold}")
+            print(f"epoch {epoch + 1}/{max_epochs} of fold {fold+1}")
             model.train()
             epoch_loss = 0
             val_loss = 0
@@ -744,7 +830,7 @@ def kfold_training():
     def save_model():
         # Reference: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -764,7 +850,7 @@ def kfold_training():
             os.makedirs(output_dir, exist_ok=True)
 
         # Step 1
-        train_loader, val_loader, train_ds, val_ds = load_data(data_dir, 1.0, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size)
+        train_loader, val_loader, train_ds, val_ds = load_data(data_dir, 1.0, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size, seed=seed, group_similar=group_similar)
 
         # Step 2
         model, loss_function, dice_metric, optimizer = gen_model(None, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
@@ -808,10 +894,10 @@ def kfold_training():
         torch.save(model.state_dict(), os.path.join(output_dir, "best_metric_model.pth"))
         return None
                 
-    models = [train(i) for i in range(kfold)]
+    [train(i, slice_to_track) for i in range(kfold)]
     # finalize Aim Run
     aim_run.close()
-    if savemodel == True:
+    if savemodel:
         save_model()
 
 def create_parser():
@@ -820,52 +906,60 @@ def create_parser():
     g.add_argument(
         '--model',
         dest='model_file',
-        type=str)
+        type=str, help="path to model configuration file (yaml)")
     g.add_argument(
         '--data',
         dest='data_dir',
-        type=str)
+        type=str, help="path to training data (dir)")
     g.add_argument(
         '--output',
         dest='output_dir',
-        type=str)
+        type=str, help="path to output folder (dir)")
     g.add_argument(
         '--split',
         dest='split_percentage',
         type=float,
-        default=0.8)
+        default=0.8, help="fraction to split training data into training/validation pair")
     g.add_argument(
         '--lr',
         dest='learning_rate',
         default=0.0001,
-        type=float)
+        type=float, help="training optimizer's learning rate (float)")
     g.add_argument(
         '--epochs',
         dest='epochs',
         default=100,
-        type=int)
+        type=int, help="total number of epoch's per training")
     g.add_argument(
         '--batch',
         dest='batch_size',
         default=1,
-        type=int)
+        type=int, help="training batch size")
     g.add_argument(
         '--transfer',
         dest='transfer_learning',
-        type=str)
+        type=str, help="path to trained model file (/path/to/file/*.pth) for transfer learning (path)")
     g.add_argument(
         '--kfold',
         dest='kfold',
-        type=int)
+        type=int, help="total number of K-fold sessions, enable with any value >= 1")
     g.add_argument(
         '--savemodel',
         dest='savemodel',
-        type=bool)
+        type=bool, help="save final trained model with the best mean-dice score")
     g.add_argument(
         '--seed',
         dest='seed',
         type=int, 
         default=0)
+    g.add_argument(
+        '--group-similar',
+        dest='group_similar',
+        action="count", help="group together similar images. The training/validation split will not split grouped images. Images are to be grouped by a shared unique ID")
+    g.add_argument(
+        '--show-config',
+        dest='show_config',
+        action="count")
     return parser
 
 def parse_args(parser):
@@ -907,7 +1001,11 @@ def parse_args(parser):
     else:
         transfer_learning = None
 
-    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, savemodel, kfold]
+    if args.show_config:
+        print_config()
+        exit()
+
+    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, savemodel, args.group_similar, kfold]
 
 
 if __name__ == "__main__":
