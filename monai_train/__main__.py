@@ -36,10 +36,11 @@ from monai.data import CacheDataset, Dataset, decollate_batch, ThreadDataLoader
 from monai.config import print_config
 from monai.apps import CrossValidation
 from aim.pytorch import track_gradients_dists, track_params_dists
-from monai_train.transformer import mtrain_transforms, kfold_transforms
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import matplotlib
+from monai_train.transformer import mtrain_transforms, kfold_transforms
+from monai_train.earlystop import EarlyStopping
 matplotlib.interactive(False)
 
 
@@ -312,7 +313,7 @@ def train_no_kfold():
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, early_stopping, early_stopping_params, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -386,6 +387,9 @@ def train_no_kfold():
     aim_run["batch_size"] = batch_size
     # log whether kfold, 0 indicates no kfold cross validation
     aim_run["kfold"] = 0
+
+    if early_stopping:
+        early_stopper = EarlyStopping(min_epochs=early_stopping_params[0], patience=early_stopping_params[1], threshold=early_stopping_params[2])
 
     for epoch in range(max_epochs):
         print("-" * 10)
@@ -511,6 +515,12 @@ def train_no_kfold():
                 aim_run.track(aim.Text(message1 + "\n" + message2 + message3), name="epoch_summary", epoch=epoch + 1)
                 print(message1, message2, message3)
 
+                # Check for early stopping
+                if early_stopping:
+                    if early_stopper.should_stop(epoch+1, metric):
+                        print(f"Early stopping at epoch {epoch+1}")
+                        break
+
     def inference_fig():
         model.load_state_dict(torch.load(os.path.join(output_dir, "best_metric_model.pth")))
         model.eval()
@@ -622,7 +632,7 @@ def kfold_training():
     try:
         # Extracting variables
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, _, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, _, early_stopping, early_stopping_params, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -715,6 +725,9 @@ def kfold_training():
             model.load_state_dict(torch.load(transfer_learning))
             model.eval()
         
+        if early_stopping:
+            early_stopper = EarlyStopping(min_epochs=early_stopping_params[0], patience=early_stopping_params[1], threshold=early_stopping_params[2])
+
         for epoch in range(max_epochs):
             print("-" * 10)
             print(f"epoch {epoch + 1}/{max_epochs} of fold {fold+1}")
@@ -824,13 +837,21 @@ def kfold_training():
                     message3 = f"at epoch: {best_metric_epoch}"
         
                     print(message1, message2, message3)
+
+                # Check for early stopping
+                if early_stopping:
+                    if early_stopper.should_stop(epoch+1, metric):
+                        print(f"Early stopping at epoch {epoch+1}")
+                        print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
+                        return model
+            
         print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
         return model
     
     def save_model():
         # Reference: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
         config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, kfold = parse_args(create_parser())[1:]
+        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, early_stopping, early_stopping_params, kfold = parse_args(create_parser())[1:]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -960,6 +981,22 @@ def create_parser():
         '--show-config',
         dest='show_config',
         action="count")
+    g.add_argument(
+        '--early-stopping',
+        dest='early_stopping',
+        action="count")
+    g.add_argument(
+        '--min-epochs',
+        dest='min_epochs',
+        type=int, help="Minimum number of epochs before checking for early-stopping criteria")
+    g.add_argument(
+        '--patience',
+        dest='patience',
+        type=int, help="Number of epochs to wait if there is no significant improvement")
+    g.add_argument(
+        '--threshold',
+        dest='threshold',
+        type=float, help="Defines what is considered an 'improvement' in the score; if the score change is below this, it's treated as no improvement.")
     return parser
 
 def parse_args(parser):
@@ -1000,12 +1037,17 @@ def parse_args(parser):
         transfer_learning = args.transfer_learning
     else:
         transfer_learning = None
+    
+    # Check if early stopping is enabled and other parameters are defined
+    if args.early_stopping:
+        if args.min_epochs is None or args.patience is None or args.threshold is None:
+            parser.error("--min-epochs, --patience, and --threshold are required when --early-stopping is enabled.")
 
     if args.show_config:
         print_config()
         exit()
 
-    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, savemodel, args.group_similar, kfold]
+    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, savemodel, args.group_similar, args.early_stopping, [args.min_epochs, args.patience, args.threshold], kfold]
 
 
 if __name__ == "__main__":

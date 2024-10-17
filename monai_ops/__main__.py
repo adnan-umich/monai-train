@@ -557,7 +557,6 @@ def nokfold_objective_training(trial, aim_run):
     # Split training data into training and validation
     split = optuna_config['optuna']['settings']['split']
 
-
     if group_similar:
         custom_dataloader = CustomDataloader(data_dicts, split_ratio=split, batch_size=batch, seed=seed)
         # Flatten the lists (since we grouped them earlier)
