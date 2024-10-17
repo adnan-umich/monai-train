@@ -390,7 +390,7 @@ def train_no_kfold():
 
     if early_stopping:
         early_stopper = EarlyStopping(min_epochs=early_stopping_params[0], patience=early_stopping_params[1], threshold=early_stopping_params[2])
-
+    
     for epoch in range(max_epochs):
         print("-" * 10)
         print(f"epoch {epoch + 1}/{max_epochs}")
@@ -516,9 +516,10 @@ def train_no_kfold():
                 print(message1, message2, message3)
 
                 # Check for early stopping
-                if early_stopping:
+                if early_stopping and epoch+1 < max_epochs:
                     if early_stopper.should_stop(epoch+1, metric):
                         print(f"Early stopping at epoch {epoch+1}")
+                        print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
                         break
 
     def inference_fig():
@@ -839,7 +840,7 @@ def kfold_training():
                     print(message1, message2, message3)
 
                 # Check for early stopping
-                if early_stopping:
+                if early_stopping and epoch+1 < max_epochs:
                     if early_stopper.should_stop(epoch+1, metric):
                         print(f"Early stopping at epoch {epoch+1}")
                         print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
