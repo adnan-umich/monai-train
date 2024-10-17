@@ -742,33 +742,33 @@ def create_parser():
     parser = argparse.ArgumentParser()
     g = parser.add_argument_group('MONAI Optimization Targets')
     g.add_argument(
-        '--optuna',
+        '-optuna', '--optuna',
         dest='config_file',
         type=str)
     g.add_argument(
-        '--data',
+        '-data', '--data',
         dest='data_dir',
         type=str)
     g.add_argument(
-        '--output',
+        '-output', '--output',
         dest='output_dir',
         type=str)
     g.add_argument(
-        '--seed',
+        '-seed', '--seed',
         dest='seed',
         type=int, 
         default=0)
     g.add_argument(
-        '--save_best_model',
+        '-save-best-model', '--save-best-model',
         dest='save_best_model',
         type=str,
         default=None)
     g.add_argument(
-        '--group-similar',
+        '-group-similar', '--group-similar',
         dest='group_similar',
         action="count", help="group together similar images. The training/validation split will not split grouped images. Images are to be grouped by a shared unique ID")
     g.add_argument(
-        '--show-config',
+        '-show-config','--show-config',
         dest='show_config',
         action="count")
     return parser

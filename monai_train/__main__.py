@@ -925,76 +925,76 @@ def create_parser():
     parser = argparse.ArgumentParser()
     g = parser.add_argument_group('MONAI Targets')
     g.add_argument(
-        '--model',
+        '-model', '--model',
         dest='model_file',
         type=str, help="path to model configuration file (yaml)")
     g.add_argument(
-        '--data',
+        '-data', '--data',
         dest='data_dir',
         type=str, help="path to training data (dir)")
     g.add_argument(
-        '--output',
+        '-output', '--output',
         dest='output_dir',
         type=str, help="path to output folder (dir)")
     g.add_argument(
-        '--split',
+        '-split', '--split',
         dest='split_percentage',
         type=float,
         default=0.8, help="fraction to split training data into training/validation pair")
     g.add_argument(
-        '--lr',
+        '-lr', '--lr',
         dest='learning_rate',
         default=0.0001,
         type=float, help="training optimizer's learning rate (float)")
     g.add_argument(
-        '--epochs',
+        '-epochs', '--epochs',
         dest='epochs',
         default=100,
         type=int, help="total number of epoch's per training")
     g.add_argument(
-        '--batch',
+        '-batch', '--batch',
         dest='batch_size',
         default=1,
         type=int, help="training batch size")
     g.add_argument(
-        '--transfer',
+        '-transfer', '--transfer',
         dest='transfer_learning',
         type=str, help="path to trained model file (/path/to/file/*.pth) for transfer learning (path)")
     g.add_argument(
-        '--kfold',
+        '-kfold', '--kfold',
         dest='kfold',
         type=int, help="total number of K-fold sessions, enable with any value >= 1")
     g.add_argument(
-        '--savemodel',
+        '-savemodel', '--savemodel',
         dest='savemodel',
         type=bool, help="save final trained model with the best mean-dice score")
     g.add_argument(
-        '--seed',
+        '-seed', '--seed',
         dest='seed',
         type=int, 
         default=0)
     g.add_argument(
-        '--group-similar',
+        '-group-similar', '--group-similar',
         dest='group_similar',
         action="count", help="group together similar images. The training/validation split will not split grouped images. Images are to be grouped by a shared unique ID")
     g.add_argument(
-        '--show-config',
+        '-show-config', '--show-config',
         dest='show_config',
         action="count")
     g.add_argument(
-        '--early-stopping',
+        '-early-stopping', '--early-stopping',
         dest='early_stopping',
         action="count")
     g.add_argument(
-        '--min-epochs',
+        '-min-epochs', '--min-epochs',
         dest='min_epochs',
         type=int, help="Minimum number of epochs before checking for early-stopping criteria")
     g.add_argument(
-        '--patience',
+        '-patience', '--patience',
         dest='patience',
         type=int, help="Number of epochs to wait if there is no significant improvement")
     g.add_argument(
-        '--threshold',
+        '-threshold', '--threshold',
         dest='threshold',
         type=float, help="Defines what is considered an 'improvement' in the score; if the score change is below this, it's treated as no improvement.")
     return parser
