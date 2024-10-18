@@ -392,148 +392,147 @@ def train_no_kfold():
     
     # Create progress bars for training and validation
     progress = MyProgressBar()
+    # Create a task for tracking the training progress
+    total_steps = max_epochs * (len(train_loader) + len(val_loader))  # Total steps for the progress bar
+    training = progress.add_task("MONAI-TRAIN", total=total_steps)
+    progress.start()
 
-    # Start the rich progress bar
-    with progress:
-        for epoch in range(max_epochs):
-            progress.log(f"\n{'-' * 10}\nEpoch {epoch + 1}/{max_epochs}")
-            model.train()
-            epoch_loss = 0
-            val_loss = 0
-            step = 0
+    for epoch in range(max_epochs):
+        progress.log(f"\n{'-' * 10}\nEpoch {epoch + 1}/{max_epochs}")
+        model.train()
+        epoch_loss = 0
+        val_loss = 0
+        step = 0
 
-            # Create a task for tracking the training progress
-            train_task = progress.add_task(f"[green]Epoch {epoch + 1} - Training", total=len(train_loader))
+        for batch_data in train_loader:
+            step += 1
+            inputs, labels = (
+                batch_data["image"].to(device),
+                batch_data["label"].to(device),
+            )
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = loss_function(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
 
-            for batch_data in train_loader:
-                step += 1
-                inputs, labels = (
-                    batch_data["image"].to(device),
-                    batch_data["label"].to(device),
-                )
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = loss_function(outputs, labels)
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
+            # Update the training progress bar
+            progress.update(training, advance=1)
+            progress.log(f"Step {step}/{len(train_loader)}, Train Loss: {loss.item():.4f}")
+            aim_run.track(loss.item(), name="batch_loss", context={"type": loss_type})
 
-                # Update the training progress bar
-                progress.update(train_task, advance=1)
-                progress.log(f"Step {step}/{len(train_loader)}, Train Loss: {loss.item():.4f}")
-                aim_run.track(loss.item(), name="batch_loss", context={"type": loss_type})
+        epoch_loss /= step
+        epoch_loss_values.append(epoch_loss)
+        aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
+        progress.log(f"Epoch {epoch + 1} average loss: {epoch_loss:.4f}")
 
-            epoch_loss /= step
-            epoch_loss_values.append(epoch_loss)
-            aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
-            progress.log(f"Epoch {epoch + 1} average loss: {epoch_loss:.4f}")
-            progress.update(train_task, description=f"[green]Epoch {epoch + 1} - Training (Avg Loss: {epoch_loss:.4f})")
+        #### Validation phase
+        step = 0
+        model.eval()
 
-            #### Validation phase
-            step = 0
+        for batch_data in val_loader:
+            step += 1
+            inputs, labels = (
+                batch_data["image"].to(device),
+                batch_data["label"].to(device),
+            )
+            outputs = sliding_window_inference(inputs=inputs, roi_size=roi_size, sw_batch_size=4, predictor=model)
+            _loss = loss_function(outputs, labels)
+            val_loss += _loss.item()
+
+            # Update the validation progress bar
+            progress.update(training, advance=1)
+            progress.log(f"Step {step}/{len(val_loader)}, Validation Loss: {_loss.item():.4f}")
+            aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
+
+        val_loss /= step
+        val_loss_values.append(val_loss)
+        progress.log(f"Epoch {epoch + 1} average validation loss: {val_loss:.4f}")
+
+        # track epoch loss metric
+        aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
+
+        progress.log(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+
+        if (epoch + 1) % val_interval == 0:
+            if (epoch + 1) % val_interval * 2 == 0:
+                # track model params and gradients
+                track_params_dists(model, aim_run)
+                # THIS SEGMENT TAKES RELATIVELY LONG (Advise Against it)
+                track_gradients_dists(model, aim_run)
+
             model.eval()
+            with torch.no_grad():
+                for index, val_data in enumerate(val_loader):
+                    val_inputs, val_labels = (
+                        val_data["image"].to(device),
+                        val_data["label"].to(device),
+                    )
+                    aim_run["validation_roi"] = roi_size
+                    sw_batch_size = 4
+                    val_outputs = sliding_window_inference(val_inputs, roi_size, sw_batch_size, model)
 
-            # Create a task for tracking the validation progress
-            val_task = progress.add_task(f"[cyan]Epoch {epoch + 1} - Validation", total=len(val_loader))
+                    # tracking input, label and output images with Aim
+                    output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
 
-            for batch_data in val_loader:
-                step += 1
-                inputs, labels = (
-                    batch_data["image"].to(device),
-                    batch_data["label"].to(device),
-                )
-                outputs = sliding_window_inference(inputs=inputs, roi_size=roi_size, sw_batch_size=4, predictor=model)
-                _loss = loss_function(outputs, labels)
-                val_loss += _loss.item()
+                    aim_run.track(
+                        aim.Image(val_inputs[0, 0, :, :, slice_to_track], caption=f"Input Image: {index}"),
+                        name="validation",
+                        context={"type": "input"},
+                    )
+                    aim_run.track(
+                        aim.Image(val_labels[0, 0, :, :, slice_to_track], caption=f"Label Image: {index}"),
+                        name="validation",
+                        context={"type": "label"},
+                    )
+                    aim_run.track(
+                        aim.Image(output, caption=f"Predicted Label: {index}"),
+                        name="predictions",
+                        context={"type": "labels"},
+                    )
 
-                # Update the validation progress bar
-                progress.update(val_task, advance=1)
-                progress.log(f"Step {step}/{len(val_loader)}, Validation Loss: {_loss.item():.4f}")
-                aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
+                    val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    val_labels = [post_label(i) for i in decollate_batch(val_labels)]
+                    # compute metric for current iteration
+                    dice_metric(y_pred=val_outputs, y=val_labels)
 
-            val_loss /= step
-            val_loss_values.append(val_loss)
-            progress.log(f"Epoch {epoch + 1} average validation loss: {val_loss:.4f}")
-            progress.update(val_task, description=f"[cyan]Epoch {epoch + 1} - Validation (Avg Loss: {val_loss:.4f})")
+                # aggregate the final mean dice result
+                metric = dice_metric.aggregate().item()
+                # track val metric
+                aim_run.track(metric, name="val_metric", context={"type": loss_type})
 
-            # track epoch loss metric
-            aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
+                # reset the status for next validation round
+                dice_metric.reset()
 
-            progress.log(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+                metric_values.append(metric)
+                if metric > best_metric:
+                    best_metric = metric
+                    best_metric_epoch = epoch + 1
+                    torch.save(model.state_dict(), os.path.join(output_dir, "best_metric_model.pth"))
 
-            if (epoch + 1) % val_interval == 0:
-                if (epoch + 1) % val_interval * 2 == 0:
-                    # track model params and gradients
-                    track_params_dists(model, aim_run)
-                    # THIS SEGMENT TAKES RELATIVELY LONG (Advise Against it)
-                    track_gradients_dists(model, aim_run)
+                    best_model_log_message = f"saved new best metric model at the {epoch+1}th epoch"
+                    aim_run.track(aim.Text(best_model_log_message), name="best_model_log_message", epoch=epoch + 1)
+                    progress.log(best_model_log_message)
 
-                model.eval()
-                with torch.no_grad():
-                    for index, val_data in enumerate(val_loader):
-                        val_inputs, val_labels = (
-                            val_data["image"].to(device),
-                            val_data["label"].to(device),
-                        )
-                        aim_run["validation_roi"] = roi_size
-                        sw_batch_size = 4
-                        val_outputs = sliding_window_inference(val_inputs, roi_size, sw_batch_size, model)
+                message1 = f"current epoch: {epoch + 1} current mean dice: {metric:.4f}"
+                message2 = f"\nbest mean dice: {best_metric:.4f} "
+                message3 = f"at epoch: {best_metric_epoch}"
 
-                        # tracking input, label and output images with Aim
-                        output = torch.argmax(val_outputs, dim=1)[0, :, :, slice_to_track].float()
+                aim_run.track(aim.Text(message1 + "\n" + message2 + message3), name="epoch_summary", epoch=epoch + 1)
+                progress.log(message1, message2, message3)
 
-                        aim_run.track(
-                            aim.Image(val_inputs[0, 0, :, :, slice_to_track], caption=f"Input Image: {index}"),
-                            name="validation",
-                            context={"type": "input"},
-                        )
-                        aim_run.track(
-                            aim.Image(val_labels[0, 0, :, :, slice_to_track], caption=f"Label Image: {index}"),
-                            name="validation",
-                            context={"type": "label"},
-                        )
-                        aim_run.track(
-                            aim.Image(output, caption=f"Predicted Label: {index}"),
-                            name="predictions",
-                            context={"type": "labels"},
-                        )
+                progress.update(training, description=f"MONAI-TRAIN - [cyan]Best Mean DICE: {best_metric:.4f}")
 
-                        val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
-                        val_labels = [post_label(i) for i in decollate_batch(val_labels)]
-                        # compute metric for current iteration
-                        dice_metric(y_pred=val_outputs, y=val_labels)
+                # Check for early stopping
+                if early_stopping and epoch+1 < max_epochs:
+                    if early_stopper.should_stop(epoch+1, metric):
+                        progress.log(f"Early stopping at epoch {epoch+1}")
+                        progress.log(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
+                        break
 
-                    # aggregate the final mean dice result
-                    metric = dice_metric.aggregate().item()
-                    # track val metric
-                    aim_run.track(metric, name="val_metric", context={"type": loss_type})
-
-                    # reset the status for next validation round
-                    dice_metric.reset()
-
-                    metric_values.append(metric)
-                    if metric > best_metric:
-                        best_metric = metric
-                        best_metric_epoch = epoch + 1
-                        torch.save(model.state_dict(), os.path.join(output_dir, "best_metric_model.pth"))
-
-                        best_model_log_message = f"saved new best metric model at the {epoch+1}th epoch"
-                        aim_run.track(aim.Text(best_model_log_message), name="best_model_log_message", epoch=epoch + 1)
-                        progress.log(best_model_log_message)
-
-                    message1 = f"current epoch: {epoch + 1} current mean dice: {metric:.4f}"
-                    message2 = f"\nbest mean dice: {best_metric:.4f} "
-                    message3 = f"at epoch: {best_metric_epoch}"
-
-                    aim_run.track(aim.Text(message1 + "\n" + message2 + message3), name="epoch_summary", epoch=epoch + 1)
-                    progress.log(message1, message2, message3)
-
-                    # Check for early stopping
-                    if early_stopping and epoch+1 < max_epochs:
-                        if early_stopper.should_stop(epoch+1, metric):
-                            progress.log(f"Early stopping at epoch {epoch+1}")
-                            progress.log(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
-                            break
+    # Stop the progress manager
+    progress.stop()
 
     def inference_fig():
         model.load_state_dict(torch.load(os.path.join(output_dir, "best_metric_model.pth")))
