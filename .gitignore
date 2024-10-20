@@ -1,4 +1,7 @@
 .aim
+/sample2
+.DS_Store
+launch.json
 /monai
 /out
 *.pth

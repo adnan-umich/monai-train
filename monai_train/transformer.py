@@ -1,4 +1,3 @@
-import numpy as np
 from monai.transforms import (
     AsDiscrete,
     AsDiscreted,
@@ -19,11 +18,28 @@ from monai.transforms import (
     RandAffined,
 )
 
+
+class VerifyImageLabelDimensions(Transform):
+    def __call__(self, data):
+        image = data["image"]
+        label = data["label"]
+        
+        # Extract the shape directly from the MetaTensor objects
+        image_shape = image.shape
+        label_shape = label.shape
+        
+        # Check if the dimensions match
+        if image_shape != label_shape:
+            raise ValueError(f"Dimension mismatch: Image {image_shape}, Label {label_shape}")
+        
+        return data
+
 def mtrain_transforms(image_size, roi_size):
     
     train_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
+            VerifyImageLabelDimensions(),  # Add verification step here
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
@@ -61,6 +77,7 @@ def mtrain_transforms(image_size, roi_size):
     val_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
+            VerifyImageLabelDimensions(),  # Add verification step here
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
@@ -85,6 +102,7 @@ def kfold_transforms(image_size, roi_size):
     train_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
+            VerifyImageLabelDimensions(),  # Add verification step here
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
@@ -122,6 +140,7 @@ def kfold_transforms(image_size, roi_size):
     val_transforms = Compose(
         [
             LoadImaged(keys=["image", "label"]),
+            VerifyImageLabelDimensions(),  # Add verification step here
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
