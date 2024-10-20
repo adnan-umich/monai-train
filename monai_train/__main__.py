@@ -293,8 +293,8 @@ def execute():
     """ Check if we are using k-fold cross validation.
     """
 
-    kfold = parse_args(create_parser())[-1]
-    group_similar = parse_args(create_parser())[-2]
+    kfold = parse_args(create_parser())["kfold"]
+    group_similar = parse_args(create_parser())["group_similar"]
 
     if kfold is not None and kfold > 0:
         print(f"A {kfold}-fold based training will start.")
@@ -311,8 +311,20 @@ def train_no_kfold():
     # initialize a new Aim Run
     try:
         # Extracting variables
-        config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, early_stopping, early_stopping_params, kfold = parse_args(create_parser())[1:]
+        config = parse_args(create_parser())['model']['model']
+        data_dir = parse_args(create_parser())["data_dir"]
+        output_dir = parse_args(create_parser())["output_dir"]
+        transfer_learning = parse_args(create_parser())["transfer_learning"]
+        split = parse_args(create_parser())["split"]
+        learning_rate = parse_args(create_parser())["learning_rate"]
+        max_epochs = parse_args(create_parser())["epochs"]
+        batch_size = parse_args(create_parser())["batch_size"]
+        seed = parse_args(create_parser())["seed"]
+        savemodel = parse_args(create_parser())["savemodel"]
+        group_similar = parse_args(create_parser())["group_similar"]
+        early_stopping = parse_args(create_parser())["early_stopping"]
+        early_stopping_params = parse_args(create_parser())["early_stopping_params"]
+        kfold = parse_args(create_parser())["kfold"]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -644,8 +656,20 @@ def kfold_training():
     # initialize a new Aim Run
     try:
         # Extracting variables
-        config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, _, early_stopping, early_stopping_params, kfold = parse_args(create_parser())[1:]
+        config = parse_args(create_parser())['model']['model']
+        data_dir = parse_args(create_parser())["data_dir"]
+        output_dir = parse_args(create_parser())["output_dir"]
+        transfer_learning = parse_args(create_parser())["transfer_learning"]
+        split = parse_args(create_parser())["split"]
+        learning_rate = parse_args(create_parser())["learning_rate"]
+        max_epochs = parse_args(create_parser())["epochs"]
+        batch_size = parse_args(create_parser())["batch_size"]
+        seed = parse_args(create_parser())["seed"]
+        savemodel = parse_args(create_parser())["savemodel"]
+        group_similar = parse_args(create_parser())["group_similar"]
+        early_stopping = parse_args(create_parser())["early_stopping"]
+        early_stopping_params = parse_args(create_parser())["early_stopping_params"]
+        kfold = parse_args(create_parser())["kfold"]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -875,8 +899,20 @@ def kfold_training():
 
     def save_model():
         # Reference: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
-        config = parse_args(create_parser())[0]['model']
-        data_dir, output_dir, transfer_learning, split, learning_rate, max_epochs, batch_size, seed, savemodel, group_similar, early_stopping, early_stopping_params, kfold = parse_args(create_parser())[1:]
+        config = parse_args(create_parser())['model']['model']
+        data_dir = parse_args(create_parser())["data_dir"]
+        output_dir = parse_args(create_parser())["output_dir"]
+        transfer_learning = parse_args(create_parser())["transfer_learning"]
+        split = parse_args(create_parser())["split"]
+        learning_rate = parse_args(create_parser())["learning_rate"]
+        max_epochs = parse_args(create_parser())["epochs"]
+        batch_size = parse_args(create_parser())["batch_size"]
+        seed = parse_args(create_parser())["seed"]
+        savemodel = parse_args(create_parser())["savemodel"]
+        group_similar = parse_args(create_parser())["group_similar"]
+        early_stopping = parse_args(create_parser())["early_stopping"]
+        early_stopping_params = parse_args(create_parser())["early_stopping_params"]
+        kfold = parse_args(create_parser())["kfold"]
         model_type = config['type']
         architecture = config['architecture']
         optimizer_dict = config['optimizer']
@@ -1072,9 +1108,21 @@ def parse_args(parser):
         print_config()
         exit()
 
-    return [model, data_dir, output_dir, transfer_learning, split_percentage, learning_rate, epochs, batch_size, seed, savemodel, args.group_similar, args.early_stopping, [args.min_epochs, args.patience, args.threshold], kfold]
-
-
+    return dict([('model', model),
+            ("data_dir", data_dir),
+            ("output_dir", output_dir), 
+            ("transfer_learning",transfer_learning),
+            ("split", split_percentage), 
+            ("learning_rate", learning_rate), 
+            ("epochs", epochs), 
+            ("batch_size", batch_size), 
+            ("seed", seed), 
+            ("savemodel", savemodel),
+            ("group_similar", args.group_similar), 
+            ("early_stopping", args.early_stopping), 
+            ("early_stopping_params", [args.min_epochs, args.patience, args.threshold]), 
+            ("kfold",kfold)])
+    
 if __name__ == "__main__":
     #print_config()
     execute()
