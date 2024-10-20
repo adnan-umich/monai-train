@@ -742,12 +742,12 @@ def kfold_training():
         # Create progress bars for training and validation
         progress = MyProgressBar()
         # Create a task for tracking the training progress
-        total_steps = max_epochs * (len(train_loaders) + len(val_loaders)) * kfold  # Total steps for the progress bar
-        ktraining = progress.add_task("MONAI-TRAIN", total=total_steps)
+        total_steps = max_epochs * (len(train_loaders[fold]) + len(val_loaders[fold])) # Total steps for the progress bar
+        ktraining = progress.add_task(f"MONAI-TRAIN - [cyan]Training fold: {fold+1}", total=total_steps)
         
         #### TRAINING STEPS BELOW ####
         progress.start()
-        progress.log(f"=============== Training for fold {fold} ===============")
+        progress.log(f"=============== Training for fold {fold+1} ===============")
         for epoch in range(max_epochs):
             progress.log(f"epoch {epoch + 1}/{max_epochs} of fold {fold+1}")
             model.train()
@@ -859,7 +859,7 @@ def kfold_training():
         
                     progress.log(message1, message2, message3)
 
-                    progress.update(ktraining, description=f"MONAI-TRAIN - [cyan]Best Mean DICE: {best_metric:.4f}")
+                    progress.update(ktraining, description=f"MONAI-TRAIN - [cyan]Training fold: {fold+1} - Best Mean DICE: {best_metric:.4f}")
 
                 # Check for early stopping
                 if early_stopping and epoch+1 < max_epochs:
