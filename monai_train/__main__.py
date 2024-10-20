@@ -441,7 +441,7 @@ def train_no_kfold():
             _loss = loss_function(outputs, labels)
             val_loss += _loss.item()
 
-            # Update the validation progress bar
+            # Update the progress bar
             progress.update(training, advance=1)
             progress.log(f"Step {step}/{len(val_loader)}, Validation Loss: {_loss.item():.4f}")
             aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
@@ -718,10 +718,8 @@ def kfold_training():
     # log whether kfold, 0 indicates no kfold cross validation
     aim_run["kfold"] = kfold
 
-    #### TRAINING STEPS BELOW ####
     def train(fold, slice_to_track):
-        print(f"=============== Training for fold {fold} ===============")
-         # Step 2
+        # Step 2
         model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
         val_interval = 2
         best_metric = -1
@@ -740,10 +738,18 @@ def kfold_training():
         
         if early_stopping:
             early_stopper = EarlyStopping(min_epochs=early_stopping_params[0], patience=early_stopping_params[1], threshold=early_stopping_params[2])
-
+        
+        # Create progress bars for training and validation
+        progress = MyProgressBar()
+        # Create a task for tracking the training progress
+        total_steps = max_epochs * (len(train_loaders) + len(val_loaders)) * kfold  # Total steps for the progress bar
+        ktraining = progress.add_task("MONAI-TRAIN", total=total_steps)
+        
+        #### TRAINING STEPS BELOW ####
+        progress.start()
+        progress.log(f"=============== Training for fold {fold} ===============")
         for epoch in range(max_epochs):
-            print("-" * 10)
-            print(f"epoch {epoch + 1}/{max_epochs} of fold {fold+1}")
+            progress.log(f"epoch {epoch + 1}/{max_epochs} of fold {fold+1}")
             model.train()
             epoch_loss = 0
             val_loss = 0
@@ -760,9 +766,10 @@ def kfold_training():
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
-                print(f"{step}/{len(train_dss[fold]) // train_loaders[fold].batch_size}, " f"train_loss: {loss.item():.4f}")
+                progress.log(f"{step}/{len(train_dss[fold]) // train_loaders[fold].batch_size}, " f"train_loss: {loss.item():.4f}")
                 # track batch loss metric
                 aim_run.track(loss.item(), name="batch_loss", context={"type": loss_type, 'kfold': fold})
+                progress.update(ktraining, advance=1)
         
             epoch_loss /= step
             epoch_loss_values.append(epoch_loss)
@@ -770,7 +777,7 @@ def kfold_training():
             # track epoch loss metric
             aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type, 'kfold': fold})
         
-            print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+            progress.log(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
             #### val loss start
             step = 0
             for batch_data in val_loaders[fold]:
@@ -785,14 +792,15 @@ def kfold_training():
                 _loss.backward()
                 #optimizer.step()
                 val_loss += _loss.item()
-                print(f"{step}/{len(val_dss[fold]) // val_loaders[fold].batch_size}, " f"validation_loss: {_loss.item():.4f}")
+                progress.update(ktraining, advance=1)
+                progress.log(f"{step}/{len(val_dss[fold]) // val_loaders[fold].batch_size}, " f"validation_loss: {_loss.item():.4f}")
                 # track batch loss metric
                 aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type, 'kfold': fold})
         
             val_loss /= step
             val_loss_values.append(val_loss)
         
-            print(f"epoch {epoch + 1} average validation loss: {val_loss:.4f}")
+            progress.log(f"epoch {epoch + 1} average validation loss: {val_loss:.4f}")
             #### val loss end
             
             if (epoch + 1) % val_interval == 0:
@@ -849,18 +857,22 @@ def kfold_training():
                     message2 = f"\nbest mean dice: {best_metric:.4f} "
                     message3 = f"at epoch: {best_metric_epoch}"
         
-                    print(message1, message2, message3)
+                    progress.log(message1, message2, message3)
+
+                    progress.update(ktraining, description=f"MONAI-TRAIN - [cyan]Best Mean DICE: {best_metric:.4f}")
 
                 # Check for early stopping
                 if early_stopping and epoch+1 < max_epochs:
                     if early_stopper.should_stop(epoch+1, metric):
-                        print(f"Early stopping at epoch {epoch+1}")
-                        print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
+                        progress.log(f"Early stopping at epoch {epoch+1}")
+                        progress.log(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
                         return model
-            
-        print(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
+  
+        progress.log(f"train completed, best_metric: {best_metric:.4f} " f"at epoch: {best_metric_epoch}")
+        progress.stop()
+
         return model
-    
+
     def save_model():
         # Reference: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
         config = parse_args(create_parser())[0]['model']
