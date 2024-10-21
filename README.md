@@ -161,7 +161,7 @@ Use the following command to run monai-train:
 ```sh
 > module load python cuda poetry
 > poetry shell
-> (monai-train-py3.11) python -m monai-train --model   = ./example/model_unet.yaml \
+> (monai-train-py3.11) monai-train --model   = ./example/model_unet.yaml \
                                              --data    = /path/to/NIfTI/dataset \
                                              --output  = /output \
                                              --split   = 0.8 \
@@ -199,7 +199,7 @@ Use the following command to run monai-train:
 ```sh
 > module load python cuda poetry
 > poetry shell
-> (monai-train-py3.11) python -m monai-ops --optuna ./example/optuna_config.yaml \
+> (monai-train-py3.11) monai-ops --optuna ./example/optuna_config.yaml \
                                            --data=/home/adnanzai/mice_data_v2 \
                                            --output /home/adnanzai/optuna \
                                            --seed 0
