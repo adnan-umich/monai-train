@@ -4,10 +4,12 @@ model:
     spatial_dims: 3
     in_channels: 1
     out_channels: 2
-    channels: [16, 32, 16, 8]
+    channels: [16, 32, 64, 128]
     strides: [2, 2, 2]
     num_res_units: 2
-    norm: "BATCH"
+    norm: "INSTANCE"
+    dropout: 0.1
+    kernel_size: 3
   optimizer: "Adam"
   beta_1: 0.999
   beta_2: 0.999
@@ -17,6 +19,6 @@ model:
     include_background: False
     softmax: True
     reduction: "mean"
-  validation_roi: [48, 48, 48]
-  image_size: [96, 96, 96]
+  validation_roi: [48,48,48]
+  image_size: [128,128,128]
   slice_to_track: 40

@@ -7,17 +7,23 @@ from monai.transforms import (
     LoadImaged,
     Orientationd,
     RandCropByPosNegLabeld,
+    RandGaussianNoised,
     SaveImaged,
     ScaleIntensityRanged,
+    ShiftIntensity,
     Spacingd,
     Invertd,
+    Resize,
+    Resized,
     ResizeD,
-    Rotate,
+    RandRotated,
+    RandRotate90d,
     Randomizable,
     Transform,
     RandAffined,
+    RandGaussianSmoothd,
 )
-
+import numpy as np
 
 class VerifyImageLabelDimensions(Transform):
     def __call__(self, data):
@@ -49,29 +55,27 @@ def mtrain_transforms(image_size, roi_size):
                 b_max=1.0,
                 clip=True,
             ),
-            #ResizeD(keys=["image", "label"],spatial_size=(256,256,256)), # Unet
-            ResizeD(keys=["image", "label"],spatial_size=(image_size)), # Unetr
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
-            RandCropByPosNegLabeld(
-                keys=["image", "label"],
-                label_key="label",
-                #spatial_size=(256,256,256), # Unet
-                spatial_size=(roi_size), # Swin Unetr
-                pos=1,
-                neg=1,
-                num_samples=4,
-                image_key="image",
-                image_threshold=0,
-            ),
+            Spacingd(keys=["image", "label"], pixdim=(1, 2.0, 2.0), mode=("bilinear", "linear")),
+            Resized(keys=["image", "label"],spatial_size=(image_size)), 
             # user can also add other random transforms
-            #RandAffined(
-            #     keys=['image', 'label'],
-            #     mode=('bilinear', 'nearest'),
-            #     prob=1.0, spatial_size=(image_size),
-            #     rotate_range=(0, 0, np.pi/15),
-            #     scale_range=(0.1, 0.1, 0.1)),
+            RandAffined(
+                 keys=['image', 'label'],
+                 mode=('bilinear', 'linear'),
+                 prob=0.7, spatial_size=(image_size),
+                 shear_range=(0.5,0.5),
+                 padding_mode='reflection'),
+            RandRotated(keys=["image", "label"], prob=0.7, 
+                        range_x=[0.1, 0.8], 
+                        mode=['bilinear', 'linear'],
+                        padding_mode="reflection"),
+            RandGaussianNoised(keys=["image"], prob=0.7, 
+                               mean=0.01, 
+                               std=0.2),
+            RandGaussianSmoothd(keys=['image'], sigma_x=(0.25, 0.75), sigma_y = (0.25, 0.75),
+                                sigma_z=(0.25, 0.75),
+                                 prob=0.7),
         ]
     )
     val_transforms = Compose(
@@ -87,11 +91,27 @@ def mtrain_transforms(image_size, roi_size):
                 b_max=1.0,
                 clip=True,
             ),
-            #ResizeD(keys=["image", "label"],spatial_size=(256,256,256)), # Unet
-            ResizeD(keys=["image", "label"],spatial_size=(image_size)), # Unetr
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
+            Spacingd(keys=["image", "label"], pixdim=(1, 2.0, 2.0), mode=("bilinear", "linear")),
+            Resized(keys=["image", "label"],spatial_size=(image_size)),
+            # user can also add other random transforms
+            RandAffined(
+                 keys=['image', 'label'],
+                 mode=('bilinear', 'linear'),
+                 prob=0.7, spatial_size=(image_size),
+                 shear_range=(0.5,0.5),
+                 padding_mode='reflection'),
+            RandRotated(keys=["image", "label"], prob=0.7, 
+                        range_x=[0.1, 0.8], 
+                        mode=['bilinear', 'linear'],
+                        padding_mode="reflection"),
+            RandGaussianNoised(keys=["image"], prob=0.7, 
+                               mean=0.01, 
+                               std=0.2),
+            RandGaussianSmoothd(keys=['image'], sigma_x=(0.25, 0.75), sigma_y = (0.25, 0.75),
+                                sigma_z=(0.25, 0.75),
+                                 prob=0.7), 
         ]
     )
     
