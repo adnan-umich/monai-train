@@ -41,6 +41,22 @@ from collections import defaultdict
 from monai_train.transformer import mtrain_transforms, kfold_transforms
 from monai_train.earlystop import EarlyStopping
 from monai_train.progress_bar import MyProgressBar
+import torch.nn.functional as F
+
+class DiceLossCrossEntropyLoss(torch.nn.Module):
+    def __init__(self, dice_weight=0.5, ce_weight=0.5):
+        super(DiceLossCrossEntropyLoss, self).__init__()
+        self.dice_loss = monai.losses.DiceLoss(include_background=True, to_onehot_y=True, softmax=True)
+        self.ce_weight = ce_weight
+        self.dice_weight = dice_weight
+
+    def forward(self, outputs, labels):
+        # Cross Entropy Loss
+        ce_loss = F.cross_entropy(outputs, labels.squeeze(1).long())  # squeeze and convert labels if needed
+        # Dice Loss
+        dice_loss = self.dice_loss(outputs, labels)
+        # Combined Loss
+        return self.dice_weight * dice_loss + self.ce_weight * ce_loss
 
 
 class CVDataset(ABC, CacheDataset):
@@ -265,6 +281,8 @@ def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, me
      ## EVALUATION METRIC ##
     if metric_type == "FocalLoss":
         loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+    elif metric_type == "DiceLossCrossEntropyLoss":
+        loss_function = DiceLossCrossEntropyLoss(dice_weight=0.3, ce_weight=0.7)
     else:
         loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
     
@@ -441,6 +459,7 @@ def train_no_kfold():
 
         #### Validation phase
         step = 0
+        val_loss = 0
         model.eval()
 
         for batch_data in val_loader:
@@ -457,11 +476,16 @@ def train_no_kfold():
             progress.update(training, advance=1)
             progress.log(f"Step {step}/{len(val_loader)}, Validation Loss: {_loss.item():.4f}")
             aim_run.track(_loss.item(), name="val_loss", context={"type": loss_type})
+        
+        # Calculate average validation loss if steps are greater than 0
+        if step > 0:
+            avg_val_loss = val_loss / step  # Average calculation
+        else:
+            avg_val_loss = float('inf')  # Or handle as needed
 
-        val_loss /= step
-        val_loss_values.append(val_loss)
-        progress.log(f"Epoch {epoch + 1} average validation loss: {val_loss:.4f}")
-
+        val_loss_values.append(avg_val_loss)
+        progress.log(f"Epoch {epoch + 1} average validation loss: {avg_val_loss:.4f}")
+        
         # track epoch loss metric
         aim_run.track(epoch_loss, name="epoch_loss", context={"type": loss_type})
 
