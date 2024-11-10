@@ -45,9 +45,9 @@ from matplotlib.widgets import Button, Slider
 
 ### USER INPUT REQUIRED ###
 # Root path to where the data is located
-DATA_DIR = "/nfs/turbo/dent-tomers/Olivia/monai-pipeline-data"
-MODEL_NAME = "/nfs/turbo/dent-tomers/Olivia/output2/best_metric_model.pth" # Full path to model pickle file, including name. ex: /home/usr/model.pth
-MODEL_CONFIG_FILE = "/home/ogott/monai-train/example/model_unet.yaml" # Full path to model configuration file, This could be the example/model_*.yaml or example/optuna_config.yaml
+DATA_DIR = "/home/adnanzai/3"
+MODEL_NAME = "/home/adnanzai/monai-train/output/best_metric_model.pth" # Full path to model pickle file, including name. ex: /home/usr/model.pth
+MODEL_CONFIG_FILE = "/home/adnanzai/monai-train/example/model_unet.yaml" # Full path to model configuration file, This could be the example/model_*.yaml or example/optuna_config.yaml
 ###
 set_determinism(seed=0)
 
@@ -106,12 +106,6 @@ post_transforms = Compose(
     ]
 )
 
-# Additional post-processing (apply non-invertible transforms)
-additional_post_transforms = Compose(
-    [
-    ]
-)
-
 # Loads data into the data loader
 test_org_ds = Dataset(data=test_data, transform=test_org_transforms)
 test_org_loader = ThreadDataLoader(test_org_ds, batch_size=1, num_workers=0)
@@ -125,8 +119,6 @@ with torch.no_grad():
         slice = 40 # Adjustable parameter (slice to visualize in the plots). Note inference is performed on the entire 3D dataset.
         test_data["pred"] = sliding_window_inference(test_inputs, roi_size, sw_batch_size, model)
         test_data = [post_transforms(i) for i in decollate_batch(test_data)]
-        test_data = [additional_post_transforms(i) for i in test_data]
-
 
         test_output = from_engine(["pred"])(test_data)
 

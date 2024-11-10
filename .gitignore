@@ -1,5 +1,6 @@
 .aim
 /sample2
+/logs
 .DS_Store
 launch.json
 /monai
