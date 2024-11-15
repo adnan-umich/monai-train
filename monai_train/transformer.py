@@ -57,7 +57,7 @@ def mtrain_transforms(image_size, roi_size):
             ),
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1, 2.0, 2.0), mode=("bilinear", "linear")),
+            Spacingd(keys=["image", "label"], pixdim=(2.5, 2.5, 1.0), mode=("bilinear", "linear")),
             Resized(keys=["image", "label"],spatial_size=(image_size)), 
             # user can also add other random transforms
             RandAffined(
@@ -93,7 +93,7 @@ def mtrain_transforms(image_size, roi_size):
             ),
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1, 2.0, 2.0), mode=("bilinear", "linear")),
+            Spacingd(keys=["image", "label"], pixdim=(2.5, 2.5, 1.0), mode=("bilinear", "linear")),
             Resized(keys=["image", "label"],spatial_size=(image_size)),
             # user can also add other random transforms
             RandAffined(
@@ -136,7 +136,7 @@ def kfold_transforms(image_size, roi_size):
             ResizeD(keys=["image", "label"],spatial_size=(image_size)), # Unetr
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
+            Spacingd(keys=["image", "label"], pixdim=(2.5, 2.5, 1.0), mode=("bilinear", "nearest")),
             RandCropByPosNegLabeld(
                 keys=["image", "label"],
                 label_key="label",
