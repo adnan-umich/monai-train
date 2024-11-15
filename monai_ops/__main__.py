@@ -41,7 +41,22 @@ from optuna.trial import TrialState
 from functools import partial
 import monai_train as mtrain
 from collections import defaultdict
+import torch.nn.functional as F
 
+class DiceLossCrossEntropyLoss(torch.nn.Module):
+    def __init__(self, dice_weight=0.5, ce_weight=0.5):
+        super(DiceLossCrossEntropyLoss, self).__init__()
+        self.dice_loss = monai.losses.DiceLoss(include_background=True, to_onehot_y=True, softmax=True)
+        self.ce_weight = ce_weight
+        self.dice_weight = dice_weight
+
+    def forward(self, outputs, labels):
+        # Cross Entropy Loss
+        ce_loss = F.cross_entropy(outputs, labels.squeeze(1).long())  # squeeze and convert labels if needed
+        # Dice Loss
+        dice_loss = self.dice_loss(outputs, labels)
+        # Combined Loss
+        return self.dice_weight * dice_loss + self.ce_weight * ce_loss
 
 class CustomDataset(Dataset):
     def __init__(self, image_label_pairs):
@@ -381,6 +396,8 @@ def saving_best_trial(id, sbm, epochs, learning_rate, batch, optimizer, beta_1, 
     ## EVALUATION METRIC ##
     if metric_type == "FocalLoss":
         loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+    elif metric_type == "DiceLossCrossEntropyLoss":
+        loss_function = DiceLossCrossEntropyLoss(dice_weight=0.3, ce_weight=0.7)
     else:
         loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
     

@@ -269,7 +269,7 @@ def load_data(data_dir: str, split: float, cache_rate:float, workers: int, batch
 
     return [train_loader, val_loader, train_ds, val_ds]
 
-def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, metric:dict, learning_rate:float, b1:float, b2:float, weight_decay:float):
+def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, metric:dict, learning_rate:float, b1:float, b2:float, weight_decay:float, loss_params:dict):
     model_type = model_type
     learning_rate = learning_rate
     metric_type = metric['type']
@@ -280,11 +280,11 @@ def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, me
 
      ## EVALUATION METRIC ##
     if metric_type == "FocalLoss":
-        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, use_softmax=True)
+        loss_function = getattr(monai.losses, metric_type)(**loss_params)
     elif metric_type == "DiceLossCrossEntropyLoss":
-        loss_function = DiceLossCrossEntropyLoss(dice_weight=0.3, ce_weight=0.7)
+        loss_function = DiceLossCrossEntropyLoss(**loss_params)
     else:
-        loss_function = getattr(monai.losses, metric_type)(to_onehot_y=True, softmax=True)
+        loss_function = getattr(monai.losses, metric_type)(**loss_params)
     
     dice_metric = DiceMetric(include_background=True, reduction="mean")
 
@@ -351,6 +351,7 @@ def train_no_kfold():
         weight_decay = config['weight_decay']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
+        loss_params = config['metric']['loss_params']
         roi_size = config['validation_roi']
         image_size = config['image_size']
         slice_to_track = config['slice_to_track']
@@ -361,6 +362,7 @@ def train_no_kfold():
         print(f"  Architecture  : {config['architecture']}")
         print(f"  Optimizer        : {config['optimizer']}")
         print(f"  Metric Type      : {config['metric']['type']}")
+        print(f"  Metric Params    : {config['metric']['loss_params']}")
         print(f"  Validation ROI   : {config['validation_roi']}")
         print(f"  Data Directory   : {data_dir}")
         print(f"  Output Directory : {output_dir}")
@@ -393,7 +395,7 @@ def train_no_kfold():
     # Step 1
     train_loader, val_loader, train_ds, val_ds = load_data(data_dir, split, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size, seed=seed, group_similar=group_similar)
     # Step 2
-    model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
+    model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay, loss_params)
 
     #### TRAINING STEPS BELOW ####
     val_interval = 2
@@ -702,6 +704,7 @@ def kfold_training():
         weight_decay = config['weight_decay']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
+        loss_params = config['metric']['loss_params']
         roi_size = config['validation_roi']
         image_size = config['image_size']
         slice_to_track = config['slice_to_track']
@@ -712,6 +715,7 @@ def kfold_training():
         print(f"  Architecture  : {config['architecture']}")
         print(f"  Optimizer        : {config['optimizer']}")
         print(f"  Metric Type      : {config['metric']['type']}")
+        print(f"  Metric Params    : {config['metric']['loss_params']}")
         print(f"  Validation ROI   : {config['validation_roi']}")
         print(f"  Data Directory   : {data_dir}")
         print(f"  Output Directory : {output_dir}")
@@ -768,7 +772,7 @@ def kfold_training():
 
     def train(fold, slice_to_track):
         # Step 2
-        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
+        model, loss_function, dice_metric, optimizer = gen_model(aim_run, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay, loss_params)
         val_interval = 2
         best_metric = -1
         best_metric_epoch = -1
@@ -945,6 +949,7 @@ def kfold_training():
         weight_decay = config['weight_decay']
         metric_dict = config['metric']
         loss_type =  config['metric']['type']
+        loss_params = config['metric']['loss_params']
         roi_size = config['validation_roi']
         image_size = config['image_size']
         slice_to_track = config['slice_to_track']
@@ -959,7 +964,7 @@ def kfold_training():
         train_loader, val_loader, train_ds, val_ds = load_data(data_dir, 1.0, 1.0, 4, batch_size=batch_size, image_size=image_size, roi_size=roi_size, seed=seed, group_similar=group_similar)
 
         # Step 2
-        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay)
+        model, loss_function, dice_metric, optimizer = gen_model(None, model_type, architecture, optimizer_dict, metric_dict, learning_rate, beta_1, beta_2, weight_decay, loss_params)
 
         #### TRAINING STEPS BELOW ####
         best_metric = -1

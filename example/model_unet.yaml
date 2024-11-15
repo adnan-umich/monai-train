@@ -4,7 +4,7 @@ model:
     spatial_dims: 3
     in_channels: 1
     out_channels: 2
-    channels: [16, 32, 64]
+    channels: [64,128,256]
     strides: [2, 2]
     num_res_units: 2
     norm: "INSTANCE"
@@ -16,9 +16,10 @@ model:
   weight_decay: 0.000001
   metric:
     type: "DiceLoss"
-    include_background: False
-    softmax: True
-    reduction: "mean"
-  validation_roi: [48,48,48]
+    loss_params:
+      include_background: True
+      to_onehot_y: True
+      softmax: True
+  validation_roi: [64,64,64]
   image_size: [128, 128, 128]
   slice_to_track: 40
