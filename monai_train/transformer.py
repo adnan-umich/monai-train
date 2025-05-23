@@ -49,15 +49,15 @@ def mtrain_transforms(image_size, roi_size):
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=-57,
-                a_max=164,
+                a_min=0,
+                a_max=256,
                 b_min=0.0,
                 b_max=1.0,
                 clip=True,
             ),
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(2.5, 2.5, 1.0), mode=("bilinear", "linear")),
+            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("linear", "linear")),
             Resized(keys=["image", "label"],spatial_size=(image_size)), 
             # user can also add other random transforms
             RandAffined(
@@ -66,16 +66,16 @@ def mtrain_transforms(image_size, roi_size):
                  prob=0.7, spatial_size=(image_size),
                  shear_range=(0.5,0.5),
                  padding_mode='reflection'),
-            RandRotated(keys=["image", "label"], prob=0.7, 
+            RandRotated(keys=["image", "label"], prob=0.3, 
                         range_x=[0.1, 0.8], 
                         mode=['bilinear', 'linear'],
                         padding_mode="reflection"),
-            RandGaussianNoised(keys=["image"], prob=0.7, 
+            RandGaussianNoised(keys=["image"], prob=0.3, 
                                mean=0.01, 
                                std=0.2),
             RandGaussianSmoothd(keys=['image'], sigma_x=(0.25, 0.75), sigma_y = (0.25, 0.75),
                                 sigma_z=(0.25, 0.75),
-                                 prob=0.7),
+                                 prob=0.3),
         ]
     )
     val_transforms = Compose(
@@ -85,33 +85,16 @@ def mtrain_transforms(image_size, roi_size):
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=-57,
-                a_max=164,
+                a_min=0,
+                a_max=256,
                 b_min=0.0,
                 b_max=1.0,
                 clip=True,
             ),
             CropForegroundd(keys=["image", "label"], source_key="image"),
             Orientationd(keys=["image", "label"], axcodes="RAS"),
-            Spacingd(keys=["image", "label"], pixdim=(2.5, 2.5, 1.0), mode=("bilinear", "linear")),
+            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("linear", "linear")),
             Resized(keys=["image", "label"],spatial_size=(image_size)),
-            # user can also add other random transforms
-            RandAffined(
-                 keys=['image', 'label'],
-                 mode=('bilinear', 'linear'),
-                 prob=0.7, spatial_size=(image_size),
-                 shear_range=(0.5,0.5),
-                 padding_mode='reflection'),
-            RandRotated(keys=["image", "label"], prob=0.7, 
-                        range_x=[0.1, 0.8], 
-                        mode=['bilinear', 'linear'],
-                        padding_mode="reflection"),
-            RandGaussianNoised(keys=["image"], prob=0.7, 
-                               mean=0.01, 
-                               std=0.2),
-            RandGaussianSmoothd(keys=['image'], sigma_x=(0.25, 0.75), sigma_y = (0.25, 0.75),
-                                sigma_z=(0.25, 0.75),
-                                 prob=0.7), 
         ]
     )
     
@@ -126,8 +109,8 @@ def kfold_transforms(image_size, roi_size):
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=-57,
-                a_max=164,
+                a_min=0,
+                a_max=256,
                 b_min=0.0,
                 b_max=1.0,
                 clip=True,
@@ -164,8 +147,8 @@ def kfold_transforms(image_size, roi_size):
             EnsureChannelFirstd(keys=["image", "label"]),
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=-57,
-                a_max=164,
+                a_min=0,
+                a_max=256,
                 b_min=0.0,
                 b_max=1.0,
                 clip=True,

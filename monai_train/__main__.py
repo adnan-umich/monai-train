@@ -286,7 +286,7 @@ def gen_model(aim_run, model_type:str, architecture:dict, optimizer_type:str, me
     else:
         loss_function = getattr(monai.losses, metric_type)(**loss_params)
     
-    dice_metric = DiceMetric(include_background=True, reduction="mean")
+    dice_metric = DiceMetric(include_background=False, reduction="mean")
 
     ## OPTIMIZATION ##
     optimizer = getattr(torch.optim, optimizer_type)(model.parameters(), learning_rate, betas=(b1, b2), weight_decay=weight_decay)

@@ -1,0 +1,24 @@
+model:
+  type: "AttentionUnet"
+  architecture:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 2
+    channels: [32, 64, 128, 256, 512]
+    strides: [2, 2, 2, 2]
+    dropout: 0.2
+    kernel_size: 3
+    up_kernel_size: 3
+  optimizer: "Adam"
+  beta_1: 0.700
+  beta_2: 0.890
+  weight_decay: 0.001
+  metric:
+    type: "DiceLoss"
+    loss_params:
+      include_background: True
+      to_onehot_y: True
+      softmax: True
+  validation_roi: [128, 128, 128]
+  image_size: [128, 128, 128]
+  slice_to_track: 40
